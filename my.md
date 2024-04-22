@@ -11,6 +11,18 @@ make check webget
 lab0
 Please open the libsponge/byte stream.hh and libsponge/byte stream.cc
 
+lab1
+
+The full (public) interface of the reassembler is described by the StreamReassembler class
+in the stream reassembler.hh header. Your task is to implement this class. You may add
+any private members and member functions you desire to the StreamReassembler class, but
+you cannot change its public interface
+
+lab2
+
+We’ve defined the type for you and provided some helper functions (see wrapping integers.hh),
+but you’ll implement the conversions in wrapping integers.cc
+
 
 ## doc
 
