@@ -8,6 +8,70 @@ sudo apt install libpcap0.8 libpcap0.8-dev -y
 
 make check webget
 
+```shell
+161/161 Test #161: t_isnD_128K_8K_lL ................   Passed    1.11 sec
+
+70% tests passed, 49 tests failed out of 161
+
+Total Test time (real) = 433.79 sec
+
+The following tests FAILED:
+         28 - t_webget (Timeout)
+         96 - t_ipv4_client_send (Timeout)
+         97 - t_ipv4_server_send (Timeout)
+         98 - t_ipv4_client_recv (Timeout)
+         99 - t_ipv4_server_recv (Failed)
+        100 - t_ipv4_client_dupl (Failed)
+        101 - t_ipv4_server_dupl (Failed)
+        102 - t_icS_1M_32k (Failed)
+        103 - t_icS_128K_8K (Timeout)
+        104 - t_icS_16_1 (Timeout)
+        105 - t_icS_32K_d (Failed)
+        106 - t_icR_1M_32k (Timeout)
+        107 - t_icR_128K_8K (Timeout)
+        108 - t_icR_16_1 (Timeout)
+        109 - t_icR_32K_d (Timeout)
+        110 - t_icD_1M_32k (Failed)
+        111 - t_icD_128K_8K (Failed)
+        112 - t_icD_16_1 (Failed)
+        113 - t_icD_32K_d (Failed)
+        114 - t_isS_1M_32k (Timeout)
+        115 - t_isS_128K_8K (Timeout)
+        116 - t_isS_16_1 (Timeout)
+        117 - t_isS_32K_d (Timeout)
+        118 - t_isR_1M_32k (Failed)
+        119 - t_isR_128K_8K (Failed)
+        120 - t_isR_16_1 (Failed)
+        121 - t_isR_32K_d (Failed)
+        122 - t_isD_1M_32k (Failed)
+        123 - t_isD_128K_8K (Timeout)
+        124 - t_isD_16_1 (Failed)
+        125 - t_isD_32K_d (Timeout)
+        126 - t_icS_128K_8K_l (Failed)
+        127 - t_icS_128K_8K_L (Failed)
+        128 - t_icS_128K_8K_lL (Failed)
+        129 - t_icR_128K_8K_l (Timeout)
+        130 - t_icR_128K_8K_L (Timeout)
+        131 - t_icR_128K_8K_lL (Timeout)
+        132 - t_icD_128K_8K_l (Timeout)
+        133 - t_icD_128K_8K_L (Failed)
+        134 - t_icD_128K_8K_lL (Failed)
+        135 - t_isS_128K_8K_l (Timeout)
+        136 - t_isS_128K_8K_L (Timeout)
+        137 - t_isS_128K_8K_lL (Timeout)
+        138 - t_isR_128K_8K_l (Timeout)
+        139 - t_isR_128K_8K_L (Failed)
+        140 - t_isR_128K_8K_lL (Failed)
+        141 - t_isD_128K_8K_l (Timeout)
+        142 - t_isD_128K_8K_L (Failed)
+        143 - t_isD_128K_8K_lL (Failed)
+Errors while running CTest
+make[3]: *** [CMakeFiles/check.dir/build.make:60: CMakeFiles/check] Error 8
+make[2]: *** [CMakeFiles/Makefile2:311: CMakeFiles/check.dir/all] Error 2
+make[1]: *** [CMakeFiles/Makefile2:318: CMakeFiles/check.dir/rule] Error 2
+make: *** [Makefile:142: check] Error 2
+```
+
 lab0
 Please open the libsponge/byte stream.hh and libsponge/byte stream.cc
 
