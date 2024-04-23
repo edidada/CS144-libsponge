@@ -54,6 +54,7 @@ Telnet 是一种早期的网络协议，用于允许用户远程登录到另一�
 
 `./apps/webget cs144.keithw.org /hello`
 
+`cmake .`
 `make check webget`
 
 ```shell
@@ -122,6 +123,13 @@ make: *** [Makefile:142: check] Error 2
 
 lab0
 Please open the libsponge/byte stream.hh and libsponge/byte stream.cc
+
+```shell
+sudo ./apps/webget cs144.keithw.org /hello
+DEBUG: Network interface has Ethernet address 0e:3f:e6:63:69:b0 and IP address 169.254.10.9
+writev: Input/output error
+```
+
 
 lab1
 
