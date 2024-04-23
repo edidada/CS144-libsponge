@@ -1,5 +1,7 @@
 # my
 
+Fall 2019
+
 ```shell
 sudo apt update
 sudo apt install libpcap0.8 libpcap0.8-dev -y
@@ -52,10 +54,29 @@ Telnet 是一种早期的网络协议，用于允许用户远程登录到另一�
 另外，实际执行这个命令之前，你需要确保你的计算机上已经安装了 Telnet 客户端，并且目标服务器 mails.jlu.edu.cn 允许 Telnet 连接。如果允许，你可能还需要提供正确的用户名和密码来登录到 SMTP 服务器。
 如果你只是想测试 SMTP 服务器的连通性，更常见的方法是使用专门的邮件测试工具，或者使用像 telnet 这样的工具连接到 SMTP 服务的标准端口（通常是 25 或 587），然后手动发送 SMTP 命令来测试连接。但请确保你了解这些命令的含义，以避免不必要的错误或问题。
 
+
+
+lab0 2.3 Listening and connecting
+
+netcat -v -l -p 9090
+telnet localhost 9090
+
+lab0 3.4 Writing webget
 `./apps/webget cs144.keithw.org /hello`
 
 `cmake .`
 `make check webget`
+
+4 An in-memory reliable byte stream
+libsponge/byte_stream.hh and libsponge/byte_stream.cc
+
+lab1
+
+StreamReassembler
+stream_reassembler.hh stream_reassembler.cc
+ByteStream
+byte_stream.hh byte_stream.cc
+
 
 ```shell
 161/161 Test #161: t_isnD_128K_8K_lL ................   Passed    1.11 sec
