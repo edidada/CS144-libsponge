@@ -5,7 +5,7 @@ sudo apt update
 sudo apt install libpcap0.8 libpcap0.8-dev -y
 ```
 
-telnet cs144.keithw.org http
+`telnet cs144.keithw.org http`
 
 ```
 telnet cs144.keithw.org http
@@ -42,18 +42,19 @@ URL. (The part between http:// and the third slash.)
 making requests, and it should close the connection as soon as it finishes replying.
 ```
 
-telnet mails.jlu.edu.cn smtp
+`telnet mails.jlu.edu.cn smtp`
 
-telnet mails.jlu.edu.cn smtp 这条命令尝试使用 Telnet 协议来连接到 mails.jlu.edu.cn 这个地址的 SMTP（简单邮件传输协议）端口。
+`telnet mails.jlu.edu.cn smtp`
+这条命令尝试使用 Telnet 协议来连接到 mails.jlu.edu.cn 这个地址的 SMTP（简单邮件传输协议）端口。
 SMTP（Simple Mail Transfer Protocol）是一种用于在服务器之间发送和接收电子邮件的 TCP/IP 标准协议。它是一种应用程序层协议，是通过 Internet 进行电子邮件通信（传输和传递电子邮件）的最常见和最常用的协议之一。
 Telnet 是一种早期的网络协议，用于允许用户远程登录到另一台计算机并执行命令。然而，由于 Telnet 不提供加密，所以其安全性较低，现在已经逐渐被更安全的协议（如 SSH）所取代。
 因此，telnet mails.jlu.edu.cn smtp 的目的可能是尝试远程连接到 mails.jlu.edu.cn 的 SMTP 服务器，以进行邮件发送或管理相关操作。但请注意，出于安全考虑，现在一般不建议使用 Telnet，而应使用更安全的协议。
 另外，实际执行这个命令之前，你需要确保你的计算机上已经安装了 Telnet 客户端，并且目标服务器 mails.jlu.edu.cn 允许 Telnet 连接。如果允许，你可能还需要提供正确的用户名和密码来登录到 SMTP 服务器。
 如果你只是想测试 SMTP 服务器的连通性，更常见的方法是使用专门的邮件测试工具，或者使用像 telnet 这样的工具连接到 SMTP 服务的标准端口（通常是 25 或 587），然后手动发送 SMTP 命令来测试连接。但请确保你了解这些命令的含义，以避免不必要的错误或问题。
 
-./apps/webget cs144.keithw.org /hello
+`./apps/webget cs144.keithw.org /hello`
 
-make check webget
+`make check webget`
 
 ```shell
 161/161 Test #161: t_isnD_128K_8K_lL ................   Passed    1.11 sec
