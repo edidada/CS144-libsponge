@@ -4,6 +4,9 @@
 sudo apt update
 sudo apt install libpcap0.8 libpcap0.8-dev -y
 ```
+
+telnet cs144.keithw.org http
+
 ./apps/webget cs144.keithw.org /hello
 
 make check webget
