@@ -124,6 +124,13 @@ make: *** [Makefile:142: check] Error 2
 lab0
 Please open the libsponge/byte stream.hh and libsponge/byte stream.cc
 
+ioctl需要sudo权限？
+ioctl 系统调用本身并不总是需要 sudo 权限。它是否需要权限取决于你尝试对哪个设备执行操作，以及这个操作是否要求特定的权限。
+ioctl 是用于设备驱动程序通信的一种机制，它允许用户空间的程序向内核空间的设备驱动程序发送命令和数据。不同的设备驱动程序会为 ioctl 实现不同的命令集合，这些命令可能具有不同的权限要求。
+如果 ioctl 调用尝试执行一个需要特殊权限的操作（例如，访问一个只有 root 用户才能访问的设备，或者执行一个只有 root 用户才能执行的操作），那么确实可能需要 sudo 权限。这是因为 sudo 允许普通用户以超级用户（root）的身份执行命令，从而绕过通常的权限限制。
+然而，如果 ioctl 调用执行的是一个不需要特殊权限的操作，那么它就不需要 sudo。这完全取决于你正在与哪个设备通信，以及你正在尝试执行哪个具体的 ioctl 命令。
+总的来说，如果你遇到 ioctl: Operation not permitted 的错误，并且你认为这是因为权限不足，那么尝试使用 sudo 来运行你的程序可能是一个解决方案。但是，你也应该检查你的程序是否真的需要这些权限，以及是否有更安全或更合适的方式来实现你的目标。
+
 ```shell
 sudo ./apps/webget cs144.keithw.org /hello
 DEBUG: Network interface has Ethernet address 0e:3f:e6:63:69:b0 and IP address 169.254.10.9
