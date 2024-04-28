@@ -102,7 +102,9 @@ class BufferViewList {
     //!@{
 
     //! \brief Construct from a std::string
-    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {}
+    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {
+        std::cout << "BufferViewList_str = " << str << std::endl;
+    }
 
     //! \brief Construct from a C string (must be NULL-terminated)
     BufferViewList(const char *s) : BufferViewList(std::string_view(s)) {}
