@@ -82,7 +82,6 @@ size_t FileDescriptor::write(BufferViewList buffer, const bool write_all) {
     do {
         auto iovecs = buffer.as_iovecs();
 
-        printf("fd_num3:%d\n",fd_num());
         ssize_t bytes_v = ::writev(fd_num(), iovecs.data(), iovecs.size());
         if (bytes_v == -1) {
             // writev 调用失败，检查 errno
