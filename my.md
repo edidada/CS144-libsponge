@@ -1,4 +1,11 @@
 # my
+Buffer(std::string &&str) noexcept : _storage(std::make_shared<std::string>(std::move(str))) {}
+noexcept 作用
+
+在 C++ 中，noexcept 是一个关键字，用于指定一个函数不会抛出异常（除非它是被调用并直接传播的异常）。
+
+
+windows ubuntu 20 gcc9，要求的是gcc8
 
 Fall 2019
 
