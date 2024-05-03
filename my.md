@@ -70,12 +70,68 @@ lab0 3.4 Writing webget
 `./apps/webget cs144.keithw.org /hello`
 
 `cmake .`
-`make check webget`
+`make check_webget`
 
 4 An in-memory reliable byte stream
 libsponge/byte_stream.hh and libsponge/byte_stream.cc
+ByteStream	An in-order byte stream
+`make check_lab0`
 
 lab1
+
+1.在实验室1中，你将实现一个流重组器——一个缝合小块的模块
+字节流（称为子串或段）的一部分返回到连续流中
+正确序列中的字节数。
+2.在实验室2中，您将实现TCP中处理入站字节流的部分：
+TCPR接收器。这涉及到思考TCP将如何表示每个字节的位置
+在流中——称为“序列号”。TCPReceiver负责
+告诉发送者（a）它能够组装多少入站字节流
+成功（这被称为“确认”）和（b）发送者还有多少字节
+允许立即发送（“流量控制”）。
+3.在实验室3中，您将实现TCP中处理出站字节流的部分：
+TCPSender。当发送者怀疑它传输的片段时，它应该如何反应
+一路上迷路了，却一直没有找到接收器？什么时候再试一次
+并重新传输丢失的段？
+4.在实验室4中，您将把以前的工作与实验室的工作结合起来，创建一个工作
+TCP实现：包含TCPSender和TCPReceiver的TCPConnection。
+您将使用它与世界各地的真实服务器进行对话
+
+Lab 1
+这个实验需要我们制作一个reassembler，也就是说，乱序地输入一些字节，我们要按照顺序将其重整，再把我们重整好的字节输入到Writer& output中。
+
+通过手册我们可以知道，output本身自然有一个capacity，而其本身也会有存在buffer，但是没有被读取的内容。因此我们的reassembler可容纳的范围就只有capacity - buffer.size()，也就是output.available_capacity()。
+
+|    bytes popped   |  bytes buffered  | reassembler cap |
+|      Writer available capacity     |
+还是容易想到，我们可以用两个deque维护当前reass的状态：一个deque<char>维护字符，一个deque<bool>维护这个地方是不是有值。
+
+buffer: \0 \0 \0 \0 a b c
+recved: F  F  F  F  T T T
+那么现在就是一个算法问题：
+
+buffered    |   empty gap  | unordered bytes 1 | empty gap       |
+| incoming bytes |
+|         |
+buffer base   first index
+我们已知buffer base是deque front的对应的index，而即将insert的数据可能会和已有数据重叠，现在要向reass buffer中填充数据。
+
+具体算法：
+
+首先得到数据对应于内部数据结构的first index。例如，如果buffer base是5，first index是6，那么自然对应于reass buffer的下标就是 6 - 5 = 1。我们记data对应于内部buffer的起止下标为d_sidx, d_eidx
+然后我们进行数据过滤：
+d_eidx < 0 证明数据已经写入output，不处理
+d_sidx < 0 代表数据的头部有一部分已经写入output，因此需要截断数据，同时修改d_sidx = 0。
+d_sidx >= capacity代表到来的数据太早了，还没有地方容纳，不处理
+d_eidx >= capacity代表数据过长，因此修改d_eidx = capacity。
+现在sidx和eidx是合理的了，但是buffer可能并没有延申到eidx，所以我们用一个while循环扩展buffer
+while(buffer.size() < d_eidx){
+buffer.push_back('\0');
+recved.push_back(false);
+}
+最后我们在 sidx ~ eidx 的范围内，填充recved为false的空位就行
+最后把连续的头部数据pop出来，写入output。
+最后是eof的处理：当我们接收到is_last，就记录内部进入eof状态。当我们的unass_size为0，就正式关闭output。
+
 
 StreamReassembler
 stream_reassembler.hh stream_reassembler.cc
