@@ -1,11 +1,14 @@
 #include "file_descriptor.hh"
 
 #include "util.hh"
-
+#include <errno.h> // 包含 errno 的定义
+#include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include <fcntl.h>
 #include <iostream>
 #include <stdexcept>
+#include <stdio.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -79,7 +82,18 @@ size_t FileDescriptor::write(BufferViewList buffer, const bool write_all) {
     do {
         auto iovecs = buffer.as_iovecs();
 
-        const ssize_t bytes_written = SystemCall("writev", ::writev(fd_num(), iovecs.data(), iovecs.size()));
+        printf("fd_num3:%d\n",fd_num());
+        ssize_t bytes_v = ::writev(fd_num(), iovecs.data(), iovecs.size());
+        if (bytes_v == -1) {
+            // writev 调用失败，检查 errno
+            int err = errno; // 获取 errno 的值并存储在局部变量中
+            fprintf(stderr, "writev failed with errno: %d\n", err);
+            // 使用 strerror 函数将 errno 转换为描述性的字符串
+            fprintf(stderr, "Error message: %s\n", strerror(err));
+            // 根据需要处理错误
+        }
+        const ssize_t bytes_written = SystemCall("writev", bytes_v);
+        printf("fd_num2:%d\n",fd_num());
         if (bytes_written == 0 and buffer.size() != 0) {
             throw runtime_error("write returned 0 given non-empty input buffer");
         }

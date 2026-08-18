@@ -9,7 +9,8 @@
 #include <string_view>
 #include <sys/uio.h>
 #include <vector>
-
+#include <ostream>
+#include <iostream>
 //! \brief A reference-counted read-only string that can discard bytes from the front
 class Buffer {
   private:
@@ -102,7 +103,9 @@ class BufferViewList {
     //!@{
 
     //! \brief Construct from a std::string
-    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {}
+    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {
+        std::cout << "BufferViewList_&str = " << str << std::endl;
+    }
 
     //! \brief Construct from a C string (must be NULL-terminated)
     BufferViewList(const char *s) : BufferViewList(std::string_view(s)) {}
@@ -111,7 +114,10 @@ class BufferViewList {
     BufferViewList(const BufferList &buffers);
 
     //! \brief Construct from a std::string_view
-    BufferViewList(std::string_view str) { _views.push_back({const_cast<char *>(str.data()), str.size()}); }
+    BufferViewList(std::string_view str) {
+      std::cout << "BufferViewList_string_view = " << str.data() <<str.size()<< std::endl; 
+      _views.push_back({const_cast<char *>(str.data()), str.size()});
+    }
     //!@}
 
     //! \brief Discard the first `n` bytes of the string (does not require a copy or move)

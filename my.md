@@ -1,12 +1,80 @@
 # my
 
+Fall 2019
+
 ```shell
 sudo apt update
 sudo apt install libpcap0.8 libpcap0.8-dev -y
 ```
-./apps/webget cs144.keithw.org /hello
 
-make check webget
+`telnet cs144.keithw.org http`
+
+```
+telnet cs144.keithw.org http
+Trying 104.196.238.229...
+Connected to cs144.keithw.org.
+    Escape character is '^]'.
+GET /hello HTTP/1.1^]
+HTTP/1.1 400 Bad Request
+Date: Tue, 23 Apr 2024 00:20:20 GMT
+Server: Apache
+Content-Length: 226
+Connection: close
+Content-Type: text/html; charset=iso-8859-1
+
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>400 Bad Request</title>
+</head><body>
+<h1>Bad Request</h1>
+<p>Your browser sent a request that this server could not understand.<br />
+</p>
+</body></html>
+Connection closed by foreign host.
+```
+
+
+```shell
+If you need to quit, hold down ctrl and press ] , and then type close .
+(b) Type GET /hello HTTP/1.1 . This tells the server the path part of the URL.
+(The part starting with the third slash.)
+(c) Type Host: cs144.keithw.org . This tells the server the host part of the
+URL. (The part between http:// and the third slash.)
+(d) Type Connection: close . This tells the server that you are finished
+making requests, and it should close the connection as soon as it finishes replying.
+```
+
+`telnet mails.jlu.edu.cn smtp`
+
+`telnet mails.jlu.edu.cn smtp`
+这条命令尝试使用 Telnet 协议来连接到 mails.jlu.edu.cn 这个地址的 SMTP（简单邮件传输协议）端口。
+SMTP（Simple Mail Transfer Protocol）是一种用于在服务器之间发送和接收电子邮件的 TCP/IP 标准协议。它是一种应用程序层协议，是通过 Internet 进行电子邮件通信（传输和传递电子邮件）的最常见和最常用的协议之一。
+Telnet 是一种早期的网络协议，用于允许用户远程登录到另一台计算机并执行命令。然而，由于 Telnet 不提供加密，所以其安全性较低，现在已经逐渐被更安全的协议（如 SSH）所取代。
+因此，telnet mails.jlu.edu.cn smtp 的目的可能是尝试远程连接到 mails.jlu.edu.cn 的 SMTP 服务器，以进行邮件发送或管理相关操作。但请注意，出于安全考虑，现在一般不建议使用 Telnet，而应使用更安全的协议。
+另外，实际执行这个命令之前，你需要确保你的计算机上已经安装了 Telnet 客户端，并且目标服务器 mails.jlu.edu.cn 允许 Telnet 连接。如果允许，你可能还需要提供正确的用户名和密码来登录到 SMTP 服务器。
+如果你只是想测试 SMTP 服务器的连通性，更常见的方法是使用专门的邮件测试工具，或者使用像 telnet 这样的工具连接到 SMTP 服务的标准端口（通常是 25 或 587），然后手动发送 SMTP 命令来测试连接。但请确保你了解这些命令的含义，以避免不必要的错误或问题。
+
+lab0 2.3 Listening and connecting
+
+netcat -v -l -p 9090
+telnet localhost 9090
+
+lab0 3.4 Writing webget
+`./apps/webget cs144.keithw.org /hello`
+
+`cmake .`
+`make check webget`
+
+4 An in-memory reliable byte stream
+libsponge/byte_stream.hh and libsponge/byte_stream.cc
+
+lab1
+
+StreamReassembler
+stream_reassembler.hh stream_reassembler.cc
+ByteStream
+byte_stream.hh byte_stream.cc
+
 
 ```shell
 161/161 Test #161: t_isnD_128K_8K_lL ................   Passed    1.11 sec
@@ -74,6 +142,20 @@ make: *** [Makefile:142: check] Error 2
 
 lab0
 Please open the libsponge/byte stream.hh and libsponge/byte stream.cc
+
+ioctl需要sudo权限？
+ioctl 系统调用本身并不总是需要 sudo 权限。它是否需要权限取决于你尝试对哪个设备执行操作，以及这个操作是否要求特定的权限。
+ioctl 是用于设备驱动程序通信的一种机制，它允许用户空间的程序向内核空间的设备驱动程序发送命令和数据。不同的设备驱动程序会为 ioctl 实现不同的命令集合，这些命令可能具有不同的权限要求。
+如果 ioctl 调用尝试执行一个需要特殊权限的操作（例如，访问一个只有 root 用户才能访问的设备，或者执行一个只有 root 用户才能执行的操作），那么确实可能需要 sudo 权限。这是因为 sudo 允许普通用户以超级用户（root）的身份执行命令，从而绕过通常的权限限制。
+然而，如果 ioctl 调用执行的是一个不需要特殊权限的操作，那么它就不需要 sudo。这完全取决于你正在与哪个设备通信，以及你正在尝试执行哪个具体的 ioctl 命令。
+总的来说，如果你遇到 ioctl: Operation not permitted 的错误，并且你认为这是因为权限不足，那么尝试使用 sudo 来运行你的程序可能是一个解决方案。但是，你也应该检查你的程序是否真的需要这些权限，以及是否有更安全或更合适的方式来实现你的目标。
+
+```shell
+sudo ./apps/webget cs144.keithw.org /hello
+DEBUG: Network interface has Ethernet address 0e:3f:e6:63:69:b0 and IP address 169.254.10.9
+writev: Input/output error
+```
+
 
 lab1
 
