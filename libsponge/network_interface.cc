@@ -35,7 +35,7 @@ void NetworkInterface::send_datagram(const InternetDatagram &dgram, const Addres
     EthernetFrame frame;
     frame.header().type = EthernetHeader::TYPE_IPv4;
     frame.header().src = _ethernet_address;
-    frame.payload() = move(dgram.serialize());
+    frame.payload() = dgram.serialize();
     if (_table.count(next_hop_ip) && _timer <= _table[next_hop_ip].ttl) {
         frame.header().dst = _table[next_hop_ip].mac;
         _frames_out.push(frame);
@@ -76,7 +76,7 @@ optional<InternetDatagram> NetworkInterface::recv_frame(const EthernetFrame &fra
                 arp_frame.header().type = EthernetHeader::TYPE_ARP;
                 arp_frame.header().src = _ethernet_address;
                 arp_frame.header().dst = msg.sender_ethernet_address;
-                arp_frame.payload() = move(reply.serialize());
+                arp_frame.payload() = reply.serialize();
                 _frames_out.push(arp_frame);
             }
             while (!_pending_arg.empty()){
@@ -138,7 +138,7 @@ void NetworkInterface::_retransmission_arp_frame(){
             arp_frame.header().type = EthernetHeader::TYPE_ARP;
             arp_frame.header().src = _ethernet_address;
             arp_frame.header().dst = ETHERNET_BROADCAST;
-            arp_frame.payload() = move(msg.serialize());
+            arp_frame.payload() = msg.serialize();
 
             _frames_out.push(arp_frame);
 

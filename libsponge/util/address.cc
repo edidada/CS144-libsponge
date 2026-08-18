@@ -3,11 +3,20 @@
 #include "util.hh"
 
 #include <arpa/inet.h>
+#include <array>
 #include <cstring>
 #include <memory>
 #include <netdb.h>
 #include <stdexcept>
 #include <system_error>
+
+// NI_MAXHOST and NI_MAXSERV are glibc extensions; define fallbacks for other platforms (e.g. macOS)
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 1025
+#endif
+#ifndef NI_MAXSERV
+#define NI_MAXSERV 32
+#endif
 
 using namespace std;
 
@@ -113,13 +122,13 @@ uint32_t Address::ipv4_numeric() const {
     sockaddr_in ipv4_addr{};
     memcpy(&ipv4_addr, &_address.storage, _size);
 
-    return be32toh(ipv4_addr.sin_addr.s_addr);
+    return ntohl(ipv4_addr.sin_addr.s_addr);
 }
 
 Address Address::from_ipv4_numeric(const uint32_t ip_address) {
     sockaddr_in ipv4_addr{};
     ipv4_addr.sin_family = AF_INET;
-    ipv4_addr.sin_addr.s_addr = htobe32(ip_address);
+    ipv4_addr.sin_addr.s_addr = htonl(ip_address);
 
     return {reinterpret_cast<sockaddr *>(&ipv4_addr), sizeof(ipv4_addr)};
 }

@@ -2,6 +2,8 @@
 
 #include "util.hh"
 
+#ifdef __linux__
+
 #include <sys/socket.h>
 #include <cstring>
 #include <fcntl.h>
@@ -36,3 +38,22 @@ TunTapFD::TunTapFD(const string &devname, const bool is_tun)
 
     SystemCall("ioctl", ioctl(fd_num(), TUNSETIFF, static_cast<void *>(&tun_req)));
 }
+
+#else  // !__linux__
+
+// TUN/TAP devices are a Linux kernel feature (require /dev/net/tun and <linux/if_tun.h>).
+// Provide a stub so the rest of the library still builds and links on other
+// platforms (e.g. macOS); any real use fails at runtime with a clear error.
+
+#include <fcntl.h>
+#include <stdexcept>
+#include <unistd.h>
+
+using namespace std;
+
+TunTapFD::TunTapFD(const string &devname, const bool /*is_tun*/)
+    : FileDescriptor(open("/dev/null", O_RDONLY)) {
+    throw runtime_error("TUN/TAP devices are only supported on Linux (tried to open \"" + devname + "\")");
+}
+
+#endif

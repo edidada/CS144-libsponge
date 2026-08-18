@@ -43,7 +43,7 @@ long StreamReassembler::merge_block(block_node &elm1, const block_node &elm2) {
 //! \details This function accepts a substring (aka a segment) of bytes,
 //! possibly out-of-order, from the logical stream, and assembles any newly
 //! contiguous substrings and writes them into the output stream in order.
-void StreamReassembler::push_substring(const string &data, const size_t index, const bool eof) {
+void StreamReassembler::push_substring(const string &data, const uint64_t index, const bool eof) {
     if (index >= _head_index + _capacity) {  // capacity over
         return;
     }

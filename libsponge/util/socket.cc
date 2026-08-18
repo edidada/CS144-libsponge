@@ -18,17 +18,16 @@ Socket::Socket(const int domain, const int type) : FileDescriptor(SystemCall("so
 //! \param[in] domain is `fd`'s domain; throws std::runtime_error if wrong value is supplied
 //! \param[in] type is `fd`'s type; throws std::runtime_error if wrong value is supplied
 Socket::Socket(FileDescriptor &&fd, const int domain, const int type) : FileDescriptor(move(fd)) {
-    int actual_value;
-    socklen_t len;
-
-    // verify domain
-    len = sizeof(actual_value);
-    SystemCall("getsockopt", getsockopt(fd_num(), SOL_SOCKET, SO_DOMAIN, &actual_value, &len));
-    if ((len != sizeof(actual_value)) or (actual_value != domain)) {
+    // verify domain (SO_DOMAIN is Linux-specific; use getsockname() instead for portability)
+    sockaddr_storage address{};
+    socklen_t len = sizeof(address);
+    SystemCall("getsockname", getsockname(fd_num(), reinterpret_cast<sockaddr *>(&address), &len));
+    if (address.ss_family != domain) {
         throw runtime_error("socket domain mismatch");
     }
 
     // verify type
+    int actual_value;
     len = sizeof(actual_value);
     SystemCall("getsockopt", getsockopt(fd_num(), SOL_SOCKET, SO_TYPE, &actual_value, &len));
     if ((len != sizeof(actual_value)) or (actual_value != type)) {

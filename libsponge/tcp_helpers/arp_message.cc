@@ -82,7 +82,7 @@ string ARPMessage::to_string() const {
         opcode_str = "REPLY";
     }
     ss << "opcode=" << opcode_str << ", sender=" << ::to_string(sender_ethernet_address) << "/"
-       << inet_ntoa({htobe32(sender_ip_address)}) << ", target=" << ::to_string(target_ethernet_address) << "/"
-       << inet_ntoa({htobe32(target_ip_address)});
+       << inet_ntoa({htonl(sender_ip_address)}) << ", target=" << ::to_string(target_ethernet_address) << "/"
+       << inet_ntoa({htonl(target_ip_address)});
     return ss.str();
 }
