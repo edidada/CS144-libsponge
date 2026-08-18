@@ -1,6 +1,6 @@
-±¾ÎÄÎªÎÒµÄË¹Ì¹¸£¼ÆËã»úÍøÂç¿ÎµÄ±à³ÌÊµÑé£¨Lab Assignments£©µÄÍê³ÉºóµÄ×÷Òµ´úÂë¡£
-¿Î³ÌÈ«³Æ£ºCS 144: Introduction to Computer Networking¡£
+æœ¬æ–‡ä¸ºæˆ‘çš„æ–¯å¦ç¦è®¡ç®—æœºç½‘ç»œè¯¾çš„ç¼–ç¨‹å®éªŒï¼ˆLab Assignmentsï¼‰çš„å®Œæˆåçš„ä½œä¸šä»£ç ã€‚
+è¯¾ç¨‹å…¨ç§°ï¼šCS 144: Introduction to Computer Networkingã€‚
 
-ËùÓĞLABÍê³ÉºóµÄ´úÂë·ÅÔÚsolution·ÖÖ§ÏÂ£¬×î¿ªÊ¼µÄLAB0µÄÔ­Ê¼´úÂë·ÅÔÚmaster·ÖÖ§ÏÂ£¬Çë¸ù¾İ×Ô¼ºµÄĞèÇó×ÔĞĞÇĞ»»¡£
+æ‰€æœ‰LABå®Œæˆåçš„ä»£ç æ”¾åœ¨solutionåˆ†æ”¯ä¸‹ï¼Œæœ€å¼€å§‹çš„LAB0çš„åŸå§‹ä»£ç æ”¾åœ¨masteråˆ†æ”¯ä¸‹ï¼Œè¯·æ ¹æ®è‡ªå·±çš„éœ€æ±‚è‡ªè¡Œåˆ‡æ¢ã€‚
 
-Èç¹ûÒòÎªÅäÖÃÎÊÌâ»òÕß±ğµÄÎÊÌâ¿¨¹ØÁË¿ÉÒÔ²Î¿¼ÎÒµÄ±Ê¼Ç£º[https://www.cnblogs.com/kangyupl/p/stanford_cs144_labs.html](https://www.cnblogs.com/kangyupl/p/stanford_cs144_labs.html)
+å¦‚æœå› ä¸ºé…ç½®é—®é¢˜æˆ–è€…åˆ«çš„é—®é¢˜å¡å…³äº†å¯ä»¥å‚è€ƒæˆ‘çš„ç¬”è®°ï¼š[https://www.cnblogs.com/kangyupl/p/stanford_cs144_labs.html](https://www.cnblogs.com/kangyupl/p/stanford_cs144_labs.html)
