@@ -38,6 +38,13 @@ jobs:
           sudo ./tun.sh check 144 145
           sudo ./tap.sh check 10
 
+      - name: Lab checks (make check_lab0-3, incl. t_webget)
+        # t_webget uses the CS144 TCP stack over the tap10 device (FullStackSocket),
+        # which must exist and be owned by the runner user (tap.sh sets user=$SUDO_USER),
+        # so no sudo is needed to attach it. Run serially (make targets are serial by default).
+        run: |
+          cd build && make check_lab0 check_lab1 check_lab2 check_lab3
+
       - name: End-to-end tests (tun/tap)
         # Requires the tun/tap devices created above; tcp_udp binds privileged ports,
         # so run ctest through sudo from the repo root.
@@ -46,9 +53,3 @@ jobs:
         # conflict with "ioctl: Device or resource busy".
         run: |
           cd build && sudo ctest --output-on-failure -R '^(t_uc|t_us|t_ic|t_is|t_udp|t_ipv4)' -j1
-
-      - name: t_webget (internet, non-blocking)
-        if: always()
-        continue-on-error: true
-        run: |
-          cd build && sudo ctest --output-on-failure -R '^t_webget$' -j1
