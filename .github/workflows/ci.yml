@@ -38,6 +38,18 @@ jobs:
           sudo ./tun.sh check 144 145
           sudo ./tap.sh check 10
 
+      - name: Diagnose tap10 network for t_webget
+        # t_webget (CS144 TCP stack over tap10 -> host NAT -> internet) timed out.
+        # Dump the tap link/route/ARP/NAT state plus a direct host fetch to tell
+        # apart a broken tap path from an egress/remote-server issue.
+        run: |
+          ip -brief addr show tap10 || true
+          ip route show dev tap10 || true
+          ip neigh show dev tap10 || true
+          sudo iptables -t nat -L -n | grep -E '169.254|MARK|MASQ' || true
+          cat /proc/sys/net/ipv4/ip_forward
+          curl -sS --max-time 5 -o /dev/null -w 'http_code=%{http_code}\n' http://cs144.keithw.org/hello || echo "curl failed"
+
       - name: Lab checks (make check_lab0-3, incl. t_webget)
         # t_webget uses the CS144 TCP stack over the tap10 device (FullStackSocket),
         # which must exist and be owned by the runner user (tap.sh sets user=$SUDO_USER),
