@@ -77,5 +77,8 @@ jobs:
         # IMPORTANT: MUST run serially (-j1) — IP-mode tests (t_ic*/t_is*/t_isn*/t_ipv4*)
         # attach the exclusive tun144/tun145 devices via TUNSETIFF; parallel runs
         # conflict with "ioctl: Device or resource busy".
+        timeout-minutes: 15
         run: |
-          cd build && sudo ctest --output-on-failure -R '^(t_uc|t_us|t_ic|t_is|t_udp|t_ipv4)' -j1
+          cd build
+          sudo ctest --output-on-failure --timeout 30 --stop-on-failure \
+            -R '^(t_uc|t_us|t_ic|t_is|t_udp|t_ipv4)' -j1
