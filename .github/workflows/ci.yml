@@ -41,8 +41,11 @@ jobs:
       - name: End-to-end tests (tun/tap)
         # Requires the tun/tap devices created above; tcp_udp binds privileged ports,
         # so run ctest through sudo from the repo root.
+        # IMPORTANT: MUST run serially (-j1) — IP-mode tests (t_ic*/t_is*/t_isn*/t_ipv4*)
+        # attach the exclusive tun144/tun145 devices via TUNSETIFF; parallel runs
+        # conflict with "ioctl: Device or resource busy".
         run: |
-          cd build && sudo ctest --output-on-failure -R '^(t_uc|t_us|t_ic|t_is|t_udp|t_ipv4)' -j2
+          cd build && sudo ctest --output-on-failure -R '^(t_uc|t_us|t_ic|t_is|t_udp|t_ipv4)' -j1
 
       - name: t_webget (internet, non-blocking)
         if: always()
