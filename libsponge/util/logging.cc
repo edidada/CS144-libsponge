@@ -29,6 +29,15 @@ void Logger::open_file(const string &path, const size_t max_size_bytes, const si
         if (not parent.empty()) {
             filesystem::create_directories(parent);
         }
+        // Archive any leftover log from a previous run so history is preserved,
+        // instead of truncating it away. The active file starts fresh each run.
+        if (file_exists(path_)) {
+            string archived = path_ + "." + compact_timestamp();
+            for (int seq = 2; file_exists(archived); ++seq) {
+                archived = path_ + "." + compact_timestamp() + "." + to_string(seq);
+            }
+            rename(path_.c_str(), archived.c_str());
+        }
         file_.open(path_, ios::trunc);
     }
 }
