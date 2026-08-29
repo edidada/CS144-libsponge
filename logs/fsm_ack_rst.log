@@ -1,0 +1,9 @@
+[2026-08-29 05:39:39.936] [INFO ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:106 void TCPConnection::connect()] connect() called: active open, sending SYN
+[2026-08-29 05:39:39.936] [INFO ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_sender.cc:151 void TCPSender::send_segment(TCPSegment&)] sending SYN (seqno=2147483647)
+[2026-08-29 05:39:39.936] [DEBUG] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_sender.cc:110 bool TCPSender::ack_received(WrappingInt32, uint16_t)] all outstanding segments acknowledged (ackno=1)
+[2026-08-29 05:39:39.936] [INFO ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_receiver.cc:28 bool TCPReceiver::segment_received(const TCPSegment&)] received SYN (ISN=2147483647): inbound stream starts at sequence number 0
+[2026-08-29 05:39:39.936] [WARN ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:62 void TCPConnection::segment_received(const TCPSegment&)] received RST: unclean shutdown
+[2026-08-29 05:39:39.936] [WARN ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:146 void TCPConnection::unclean_shutdown(bool)] unclean shutdown
+[2026-08-29 05:39:39.936] [WARN ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:62 void TCPConnection::segment_received(const TCPSegment&)] received RST: unclean shutdown
+[2026-08-29 05:39:39.936] [WARN ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:146 void TCPConnection::unclean_shutdown(bool)] unclean shutdown
+[2026-08-29 05:39:39.937] [WARN ] [thread 129514283677504] [/workspaces/CS144-libsponge/libsponge/tcp_connection.cc:146 void TCPConnection::unclean_shutdown(bool)] unclean shutdown (sending RST)

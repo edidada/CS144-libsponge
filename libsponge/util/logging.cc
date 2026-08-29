@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <unistd.h>
 
 using namespace std;
 
@@ -127,6 +128,23 @@ Logger::Line::~Line() {
     record << '[' << Logger::timestamp() << "] [" << left << setw(5) << Logger::level_tag(level_) << "] "
            << "[thread " << this_thread::get_id() << "] [" << file_ << ':' << line_ << ' ' << func_ << "] "
            << buffer_.str() << '\n';
+
+    // Library-only programs (notably unit tests) don't call open_file(). Give
+    // each executable its own append-only log so their state-machine traces
+    // are retained as well as mirrored to stderr. Applications that call
+    // open_file() keep their explicitly selected file and rotation policy.
+    if (not logger_.file_.is_open() and logger_.path_.empty()) {
+        string executable = "libsponge";
+        char path[4096];
+        const ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+        if (length > 0) {
+            path[length] = '\0';
+            executable = filesystem::path(path).filename().string();
+        }
+        filesystem::create_directories("logs");
+        logger_.path_ = "logs/" + executable + ".log";
+        logger_.file_.open(logger_.path_, ios::app);
+    }
 
     if (logger_.terminal_) {
         cerr.write(record.str().data(), record.str().size());

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Network prefix used by both setup and health checks.
+. "$(dirname "$0")"/etc/tunconfig
+
 show_usage () {
     echo "Usage: $0 <start | stop | restart | check> [tapnum ...]"
     exit 1
@@ -17,6 +20,10 @@ start_tap () {
     # Apply NAT (masquerading) only to traffic from CS144's network devices
     iptables -t nat -A PREROUTING -s ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -j CONNMARK --set-mark ${TAPNUM}
     iptables -t nat -A POSTROUTING -j MASQUERADE -m connmark --mark ${TAPNUM}
+    iptables -C FORWARD -s ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -s ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -j ACCEPT
+    iptables -C FORWARD -d ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -d ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     echo 1 > /proc/sys/net/ipv4/ip_forward
 }
 
@@ -24,6 +31,10 @@ stop_tap () {
     local TAPDEV="tap$1"
     iptables -t nat -D PREROUTING -s ${TUN_IP_PREFIX}.${1}.0/24 -j CONNMARK --set-mark ${1}
     iptables -t nat -D POSTROUTING -j MASQUERADE -m connmark --mark ${1}
+    iptables -C FORWARD -s ${TUN_IP_PREFIX}.${1}.0/24 -j ACCEPT 2>/dev/null && \
+        iptables -D FORWARD -s ${TUN_IP_PREFIX}.${1}.0/24 -j ACCEPT
+    iptables -C FORWARD -d ${TUN_IP_PREFIX}.${1}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null && \
+        iptables -D FORWARD -d ${TUN_IP_PREFIX}.${1}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     ip tuntap del mode tap name "$TAPDEV"
 }
 
@@ -52,6 +63,8 @@ check_tap () {
     # make sure tap is healthy: device is up, ip_forward is set, and iptables is configured
     ip link show ${TAPDEV} &>/dev/null || return 1
     [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ] || return 2
+    iptables -C FORWARD -s ${TUN_IP_PREFIX}.${1}.0/24 -j ACCEPT 2>/dev/null || return 2
+    iptables -C FORWARD -d ${TUN_IP_PREFIX}.${1}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || return 2
 }
 
 check_sudo () {
@@ -76,8 +89,11 @@ if [ "$#" = "0" ]; then
     set -- 10
 fi
 
-# execute 'check' before trying to sudo
-# - like start, but exit successfully if everything is OK
+# Health checks include firewall rules and therefore need the same privileges
+# as start/stop operations.
+check_sudo "$@"
+
+# Like start, but exit successfully if everything is OK.
 if [ "$MODE" = "check" ]; then
     declare -a INTFS
     MODE="start"
@@ -102,12 +118,6 @@ if [ "$MODE" = "check" ]; then
     fi
     echo -e "[$0] Bringing up tunnels ${INTFS[@]}:"
 fi
-
-# sudo if necessary
-check_sudo "$@"
-
-# get configuration
-. "$(dirname "$0")"/etc/tunconfig
 
 # start, stop, or restart all intfs
 eval "${MODE}_all" "$@"

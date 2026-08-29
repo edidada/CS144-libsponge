@@ -126,14 +126,15 @@ bool TCPConnection::push_segments_out(bool send_syn) {
     while (!_sender.segments_out().empty()) {
         seg = _sender.segments_out().front();
         _sender.segments_out().pop();
-        if (_receiver.ackno().has_value()) {
+        const bool send_rst = _need_send_rst;
+        if (send_rst) {
+            _need_send_rst = false;
+            seg.header().rst = true;
+            seg.header().ack = false;
+        } else if (_receiver.ackno().has_value()) {
             seg.header().ack = true;
             seg.header().ackno = _receiver.ackno().value();
             seg.header().win = _receiver.window_size();
-        }
-        if (_need_send_rst) {
-            _need_send_rst = false;
-            seg.header().rst = true;
         }
         _segments_out.push(seg);
     }
@@ -147,8 +148,20 @@ void TCPConnection::unclean_shutdown(bool send_rst) {
     _sender.stream_in().set_error();
     _active = false;
     if (send_rst) {
+        // A local abort sends one empty RST. When the abort follows a failed
+        // retransmission, use that oldest unacknowledged segment's sequence
+        // number, but don't copy its data or ACK flag into the reset segment.
+        optional<WrappingInt32> reset_seqno{};
+        if (!_sender.segments_out().empty()) {
+            reset_seqno = _sender.segments_out().front().header().seqno;
+        }
+        while (!_sender.segments_out().empty()) {
+            _sender.segments_out().pop();
+        }
         _need_send_rst = true;
-        if (_sender.segments_out().empty()) {
+        if (reset_seqno.has_value()) {
+            _sender.send_empty_segment(reset_seqno.value());
+        } else {
             _sender.send_empty_segment();
         }
         push_segments_out();
