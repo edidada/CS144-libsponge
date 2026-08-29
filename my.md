@@ -2159,3 +2159,44 @@ Lab 5/6 的日志补充对应知识点：
 - 配套的 Lab5 `network_interface.cc`：发送前查 ARP 表，未命中则广播 ARP 请求并缓存待发帧（带 TTL 防死锁），收到 ARP 回复后更新 MAC 表并续发——对应 `webget.log` 中 `Network interface has Ethernet address … and IP address …` 的初始化日志。
 
 > 说明：Lab4/5 的 tun/tap 实机测试（`tcp_ipv4`/`tcp_udp`/`tcp_native`/`tun` 等）需 sudo 权限，命令见会话记录；`tcpsocket_test` 使用 OS 原生 socket（不经 libsponge TCP 栈），故其日志文件为空属正常。
+
+---
+
+## 修复 `t_ipv4_client_send` 在 CI/WSL 中超时
+
+### 故障现象与判断
+
+端到端测试中，UDP 相关测试全部通过，但第一个依赖 TUN 的 IPv4 测试 `t_ipv4_client_send` 超时。日志显示客户端尝试连接约 6 秒后进入 `RESET`，服务端则一直停留在监听状态。
+
+这里的 `Connection established` 日志并不能证明三次握手成功：当前 `connect()` 在 TCP 状态离开 `SYN_SENT` 后就打印该日志，而连接收到 `RST` 同样会离开 `SYN_SENT`。约 6 秒的等待时间也与 SYN 按 12、24、48、96、192、384、768、1536、3072 ms 指数退避重传，最终超过最大重传次数后发送 RST 的行为吻合。
+
+由于普通 UDP 测试正常，而一进入需要主机在 `tun144` 和 `tun145` 之间转发数据包的 IPv4 测试就失败，因此问题更符合宿主机转发策略异常，而不是 TCP 状态机或数据传输逻辑错误。原来的 `tun.sh` 只开启了 `net.ipv4.ip_forward` 并配置 NAT，没有显式允许 `FORWARD` 链流量；Docker、GitHub Actions 和部分 WSL 环境常把该链默认策略设置为 `DROP`，于是 SYN 在宿主机转发阶段被丢弃。
+
+### 对 `tun.sh` 的修改
+
+- 为每个 CS144 TUN 子网添加来源方向的 `FORWARD ACCEPT` 规则，使实验网络发出的数据能够被宿主机转发。
+- 添加目的方向的 `RELATED,ESTABLISHED` 放行规则，使返回流量能够进入对应 TUN 子网。
+- 使用 `iptables -C` 检查规则是否已经存在，避免重复添加。
+- 在停止 TUN 设备时同步删除上述规则。
+- 扩展 `check_tun()`：除设备状态和 `ip_forward` 外，也检查两条转发规则；规则缺失时自动重建 TUN 配置。
+- 因为读取 iptables 规则需要管理员权限，把 `check_sudo` 提前到健康检查之前。
+- 把 `etc/tunconfig` 提前加载，确保健康检查阶段已经能取得 `TUN_IP_PREFIX`。
+
+新增规则只允许 `169.254.144.0/24`、`169.254.145.0/24` 等本项目创建的实验子网，不会把宿主机的所有转发流量全部放开。
+
+### 验证情况
+
+已执行：
+
+```bash
+bash -n tun.sh
+git diff --check
+```
+
+两项检查均通过。本地环境缺少 `libpcap`，且没有可用的特权 TUN 配置，因此未在本地完整运行 IPv4 端到端测试。可在 CI 或 WSL 中重新验证：
+
+```bash
+sudo ./tun.sh check 144 145
+cd build
+sudo ctest --output-on-failure --timeout 30 -R '^t_ipv4_client_send$'
+```
