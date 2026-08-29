@@ -1,5 +1,6 @@
 #include "tcp_sender.hh"
 
+#include "logging.hh"
 #include "tcp_config.hh"
 #include "wrapping_integers.hh"
 
@@ -94,6 +95,10 @@ bool TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
 
     fill_window();
 
+    if (_consecutive_retransmission > 0) {
+        LOG_INFO << "ACK advanced to " << abs_ackno << ": retransmission count reset, RTO restored to "
+                 << _initial_retransmission_timeout << "ms";
+    }
     _retransmission_timeout = _initial_retransmission_timeout;
     _consecutive_retransmission = 0;
 
@@ -101,6 +106,8 @@ bool TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_si
     if (!_segments_outstanding.empty()) {
         _timer_running = true;
         _timer = 0;
+    } else {
+        LOG_DEBUG << "all outstanding segments acknowledged (ackno=" << abs_ackno << ")";
     }
     return true;
 }
@@ -112,6 +119,8 @@ void TCPSender::tick(const size_t ms_since_last_tick) {
         _segments_out.push(_segments_outstanding.front());
         _consecutive_retransmission++;
         _retransmission_timeout *= 2;
+        LOG_WARN << "retransmitting oldest segment: retransmission #" << _consecutive_retransmission
+                 << ", RTO doubled to " << _retransmission_timeout << "ms";
         _timer_running = true;
         _timer = 0;
     }
@@ -138,6 +147,12 @@ void TCPSender::send_empty_segment(WrappingInt32 seqno) {
 
 void TCPSender::send_segment(TCPSegment &seg) {
     seg.header().seqno = wrap(_next_seqno, _isn);
+    if (seg.header().syn) {
+        LOG_INFO << "sending SYN (seqno=" << seg.header().seqno << ")";
+    }
+    if (seg.header().fin) {
+        LOG_INFO << "sending FIN (seqno=" << seg.header().seqno << ")";
+    }
     _next_seqno += seg.length_in_sequence_space();
     _bytes_in_flight += seg.length_in_sequence_space();
     _segments_outstanding.push(seg);

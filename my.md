@@ -2028,6 +2028,7 @@ Lab 0～6 的所有可执行程序都接入了统一的日志模块 `libsponge/u
 - **级别过滤**：`set_min_level()` 运行时控制输出下限；`LOCAL_DEBUG/INFO/WARN/ERROR` 四级。
 - **双输出**：始终镜像到 stderr（终端可见），同时写入日志文件。
 - **日志轮转**：`open_file(path, 512*1024, 3000)` 默认当文件超过 **500 KB 或 3000 行**时自动归档为 `<path>.<YYYYMMDD-HHMMSS.mmm>`（命名冲突自动追加 `.N`），再新建空文件继续写——对应工业界的 logrotate 思路，避免单个日志无限膨胀。
+- **启动自动归档**：程序每次启动若发现 `path` 已存在，会先把旧文件归档（重命名加时间戳）再写新的，因此**多次运行的历史日志全部保留**、互不覆盖（glog 同款行为，不再是简单 trunc 清空）。
 - **接入方式**：任何 app 只需两行即可启用：
   ```cpp
   #include "logging.hh"
@@ -2039,12 +2040,12 @@ Lab 0～6 的所有可执行程序都接入了统一的日志模块 `libsponge/u
 
 | Lab | 程序 | 日志文件 |
 | --- | --- | --- |
-| Lab 0 | `webget` | `webget.log` |
-| Lab 1/2 | `tcp_native`、`tcpsocket_test` | `tcp_native.log`、`tcpsocket_test.log` |
-| Lab 3 | `tcp_benchmark` | `tcp_benchmark.log` |
-| Lab 4 | `tcp_ipv4` | `tcp_ipv4.log` |
-| Lab 5 | `tcp_udp`、`udp_tcpdump` | `tcp_udp.log`、`udp_tcpdump.log` |
-| Lab 6 | `tcp_ip_ethernet`、`tun` | `tcp_ip_ethernet.log`、`tun.log` |
+| Lab 0 | `webget` | `logs/webget.log` |
+| Lab 1/2 | `tcp_native`、`tcpsocket_test` | `logs/tcp_native.log`、`logs/tcpsocket_test.log` |
+| Lab 3 | `tcp_benchmark` | `logs/tcp_benchmark.log` |
+| Lab 4 | `tcp_ipv4` | `logs/tcp_ipv4.log` |
+| Lab 5 | `tcp_udp`、`udp_tcpdump` | `logs/tcp_udp.log`、`logs/udp_tcpdump.log` |
+| Lab 6 | `tcp_ip_ethernet`、`tun` | `logs/tcp_ip_ethernet.log`、`logs/tun.log` |
 
 ### 2. 日志信息与 Lab 知识点的对应关系
 
@@ -2072,3 +2073,89 @@ Lab 5/6 的日志补充对应知识点：
 - **源码位置**：`__FILE__`、`__LINE__`、`__PRETTY_FUNCTION__`（GNU 扩展，输出含类名/模板实参的完整签名）在编译期展开，零运行时开销。
 - **文件流与轮转**：`std::ofstream` 以 `trunc` 模式打开；`tellp()` 读取写入后的文件偏移作为大小判断依据；`std::rename` 原子地归档旧文件，保证新文件立即从零开始。
 - **时间**：`std::chrono::system_clock` + `duration_cast<milliseconds>` 取毫秒；`put_time` 格式化；文件命名时间戳与日志行内时间戳共用一套时钟，便于归档文件与内容的对应。
+
+### 4. 结合真实运行日志逐 Lab 讲解（2026-08-29 实测）
+
+以下日志全部来自**本机实际运行**（`logs/` 目录），逐条对应到 Lab 实现代码与 TCP/IP 知识点。
+
+#### 4.1 Lab0：webget 真实 HTTP 抓取（`logs/webget.log`）
+
+```
+[DEBUG] Network interface has Ethernet address da:c3:7b:5b:d5:f2 and IP address 169.254.10.9
+[DEBUG] Connecting to 36.152.44.132:80...
+[INFO ] Connection established to 36.152.44.132:80.
+[DEBUG] Outbound stream to 36.152.44.132:80 finished (59 bytes still in flight).
+[DEBUG] Outbound stream to 36.152.44.132:80 has been fully acknowledged.
+```
+
+- `Network interface has Ethernet address … and IP address 169.254.10.9` —— `NetworkInterface` 构造（`network_interface.cc:26`）：链路层 MAC + IP 绑定；`169.254.x.x` 为 link-local，sponge 栈不依赖 DHCP，自配置地址即可收发。
+- `Connecting to …:80...` → `Connection established` —— `TCPSpongeSocket::connect()`（`tcp_sponge_socket.cc:215/226`）内部完成**三次握手**：SYN(随机 ISN)→SYN+ACK→ACK，Ethernet/IP/TCP 全栈自下而上交付，握手完成才返回。
+- `Outbound stream … finished (59 bytes still in flight)` —— 发送侧：`GET / HTTP/1.1\r\nHost: …\r\nConnection: close\r\n\r\n` 恰好 59 字节写入 outbound `ByteStream`；`bytes in flight` = 已发未 ACK 的字节，对应 Lab2/3 的发送窗口。
+- `… has been fully acknowledged` —— 对端 ACK 收齐（`TCPSender::ack_received` 中 `_segments_outstanding` 清空），HTTP 响应正文经 `get_URL` 打印到 stdout（实测 `HTTP/1.1 200 OK`）。
+
+#### 4.2 Lab2/3/4：tcp_benchmark 完整 TCP 生命周期（`logs/tcp_benchmark.log` 及其归档）
+
+`tcp_benchmark` 用两个 `TCPConnection`（x 主动、y 被动）互喂段，传输 100MB 数据，日志完整呈现**三次握手 → 数据/重传 → 挥手关闭**：
+
+三次握手（随机 ISN，来自归档文件）：
+
+```
+[INFO ] void TCPConnection::connect()] connect() called: active open, sending SYN
+[INFO ] void TCPSender::send_segment(TCPSegment&)] sending SYN (seqno=2018459252)
+[INFO ] bool TCPReceiver::segment_received(const TCPSegment&)] received SYN (ISN=2018459252): inbound stream starts at sequence number 0
+[INFO ] void TCPConnection::segment_received(const TCPSegment&)] received SYN (seq=2018459252): passive open, replying with SYN+ACK
+[INFO ] void TCPConnection::connect()] connect() called: active open, sending SYN     ← 被动侧内部回 SYN+ACK
+[INFO ] void TCPSender::send_segment(TCPSegment&)] sending SYN (seqno=1093048740)
+```
+
+- `TCPSender::send_segment`：`seg.header().seqno = wrap(_next_seqno, _isn)`，ISN 来自 `random_device()`（2018459252，每次运行不同——防序列号预测/伪造攻击）。
+- `TCPReceiver::segment_received`：被动侧记 `_isn`，**绝对序号从 1 开始**（SYN 本身占一个序号，`abs_seqno=1, _base=1`）。
+- `TCPConnection::segment_received` 判断 `_sender.next_seqno_absolute() == 0` → 收到 SYN 即被动打开，内部复用 `connect()` 发送 SYN+ACK——代码路径与日志完全对应。
+
+传输与重传（RTO 指数退避）：
+
+```
+[INFO ] TCPSender::ack_received] ACK advanced to 99519889: retransmission count reset, RTO restored to 1000ms
+[WARN ] TCPSender::tick] retransmitting oldest segment: retransmission #1, RTO doubled to 2000ms
+[DEBUG] TCPSender::ack_received] all outstanding segments acknowledged (ackno=104857602)
+```
+
+- `ack_received`：`unwrap(ackno, _isn, _recv_ackno)` 把 32 位回绕序号还原为 64 位绝对序号；`abs_ackno > _next_seqno` 判为非法（不能确认尚未发送的数据）；合法则弹出 outstanding 中被确认的段、`bytes_in_flight` 扣减、`fill_window()` 续传、RTO 复位 1000ms、重传计数清零、重启定时器。
+- `tick`：RTO 超时把最老段重新入队并 `RTO *= 2` 指数退避；日志 `retransmission #1, RTO doubled to 2000ms`，随后 ACK 到达立即复位——体现**重传定时器只在收到新 ACK 时重置**（Karn 规则思想）。
+- benchmark 中重传频繁是模拟器每 tick 大步长（100ms）推进所致（RTO=1000ms 在模拟时间上很快超时），真实网络 RTT 毫秒级不会如此频繁；日志反而直观演示了 RTO 退避机制。
+
+挥手与关闭：
+
+```
+[INFO ] TCPSender::send_segment] sending FIN (seqno=1465345898)
+[INFO ] TCPReceiver::segment_received] received FIN (seq=1465345898): inbound stream ends
+[INFO ] TCPConnection::segment_received] received FIN (seq=1465345898): inbound stream ends
+[DEBUG] TCPSender::ack_received] all outstanding segments acknowledged (ackno=104857602)
+[INFO ] TCPConnection::clean_shutdown] TCP connection closed cleanly (FIN exchange complete, all data acknowledged)
+```
+
+- `sending FIN`：`fill_window` 在窗口非满且 `_stream.eof()` 时给最后一个段追加 FIN（FIN 占 1 序号）。
+- `received FIN` 出现 receiver 与 connection 两层：receiver 层置 `_fin_flag` 收尾入站流；connection 层据此判定对端关闭。
+- `clean_shutdown`：满足 `_sender.stream_in().eof() && bytes_in_flight()==0 && _receiver.stream_out().input_ended()` 且（无 linger 或距最后收段 ≥ 10×RTO）→ `_active=false`，连接干净关闭（日志行 164）。
+
+日志轮转实测：100MB 传输共产生 **13322 行**日志，**500KB 阈值先触发**自动归档为 6 个 `tcp_benchmark.log.<时间戳>`（每档 ~2165 行 ≈ 498KB）——大数据量下日志模块的健壮性验证。
+
+#### 4.3 Lab5/6：network_simulator 路由器拓扑（`logs/network_simulator.log`）
+
+```
+[DEBUG] Network interface has Ethernet address 02:00:00:c8:01:0f and IP address 171.67.76.46
+[DEBUG] Network interface has Ethernet address 02:00:00:66:d2:2a and IP address 10.0.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:98:b2:d4 and IP address 172.16.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:45:6b:fe and IP address 192.168.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:e0:1e:ea and IP address 198.178.229.1
+[DEBUG] Network interface has Ethernet address 02:00:00:67:74:e3 and IP address 143.195.0.2
+[DEBUG] Network interface has Ethernet address 0a:fa:ca:33:6c:3b and IP address 10.0.0.2
+[DEBUG] Network interface has Ethernet address c2:52:c6:d0:25:c0 and IP address 198.178.229.42
+…（共 13 个接口）
+```
+
+- 13 个接口构造日志即 **CS144 顶层互联网拓扑**：`171.67.76.46`（Stanford 顶层交换机）、`10.0.0.1/172.16.0.1/192.168.0.1/143.195.0.2/198.178.229.1`（各区域路由器接口）、`198.178.229.42/43`（终端）。
+- `network_simulator` 随机注入 100 个 IPv4 包，路由器按**最长前缀匹配（LPM）**查转发表转发、TTL 递减、校验和重算（路由表在 `router.cc` 用前缀树维护）。
+- 配套的 Lab5 `network_interface.cc`：发送前查 ARP 表，未命中则广播 ARP 请求并缓存待发帧（带 TTL 防死锁），收到 ARP 回复后更新 MAC 表并续发——对应 `webget.log` 中 `Network interface has Ethernet address … and IP address …` 的初始化日志。
+
+> 说明：Lab4/5 的 tun/tap 实机测试（`tcp_ipv4`/`tcp_udp`/`tcp_native`/`tun` 等）需 sudo 权限，命令见会话记录；`tcpsocket_test` 使用 OS 原生 socket（不经 libsponge TCP 栈），故其日志文件为空属正常。
