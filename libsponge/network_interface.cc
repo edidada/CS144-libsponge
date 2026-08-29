@@ -1,5 +1,6 @@
 #include "network_interface.hh"
 
+#include "address.hh"
 #include "arp_message.hh"
 #include "ethernet_frame.hh"
 #include "logging.hh"
@@ -39,8 +40,12 @@ void NetworkInterface::send_datagram(const InternetDatagram &dgram, const Addres
     frame.payload() = move(dgram.serialize());
     if (_table.count(next_hop_ip) && _timer <= _table[next_hop_ip].ttl) {
         frame.header().dst = _table[next_hop_ip].mac;
+        LOG_DEBUG << "send IPv4 datagram -> next-hop " << next_hop.ip() << " [MAC "
+                  << to_string(_table[next_hop_ip].mac) << "] (ARP cache hit)";
         _frames_out.push(frame);
     } else {
+        LOG_DEBUG << "send IPv4 datagram -> next-hop " << next_hop.ip()
+                  << ": no ARP entry, queue frame + send ARP request";
         _pending_arg.push(next_hop_ip);
         _retransmission_arp_frame();
         _frames_waiting.push({frame, next_hop_ip});
@@ -62,9 +67,16 @@ optional<InternetDatagram> NetworkInterface::recv_frame(const EthernetFrame &fra
     } else if (frame.header().type == EthernetHeader::TYPE_ARP) {
         ARPMessage msg;
         if (msg.parse(frame.payload()) == ParseResult::NoError) {
+            LOG_DEBUG << "recv ARP " << (msg.opcode == ARPMessage::OPCODE_REQUEST ? "REQUEST" : "REPLY")
+                      << ": sender MAC " << to_string(msg.sender_ethernet_address) << " IP "
+                      << Address::from_ipv4_numeric(msg.sender_ip_address).ip() << ", target MAC "
+                      << to_string(msg.target_ethernet_address) << " IP "
+                      << Address::from_ipv4_numeric(msg.target_ip_address).ip();
             uint32_t ip = msg.sender_ip_address;
             _table[ip].mac = msg.sender_ethernet_address;
             _table[ip].ttl = _timer + 30 * 1000;  // active mappings last 30 seconds
+            LOG_DEBUG << "ARP cache learned: " << Address::from_ipv4_numeric(ip).ip() << " -> "
+                      << to_string(msg.sender_ethernet_address) << " (ttl 30s)";
             if (msg.opcode == ARPMessage::OPCODE_REQUEST && msg.target_ip_address == _ip_address.ipv4_numeric()) {
                 ARPMessage reply;
                 reply.opcode = ARPMessage::OPCODE_REPLY;
@@ -78,6 +90,8 @@ optional<InternetDatagram> NetworkInterface::recv_frame(const EthernetFrame &fra
                 arp_frame.header().src = _ethernet_address;
                 arp_frame.header().dst = msg.sender_ethernet_address;
                 arp_frame.payload() = move(reply.serialize());
+                LOG_DEBUG << "send ARP REPLY -> " << Address::from_ipv4_numeric(msg.sender_ip_address).ip() << " ["
+                          << to_string(msg.sender_ethernet_address) << "]: my MAC " << to_string(_ethernet_address);
                 _frames_out.push(arp_frame);
             }
             while (!_pending_arg.empty()){
@@ -141,6 +155,10 @@ void NetworkInterface::_retransmission_arp_frame(){
             arp_frame.header().dst = ETHERNET_BROADCAST;
             arp_frame.payload() = move(msg.serialize());
 
+            LOG_DEBUG << "send ARP REQUEST who-has " << Address::from_ipv4_numeric(ip).ip()
+                      << "? (broadcast dst ff:ff:ff:ff:ff:ff, target MAC 00:00:00:00:00:00), sender "
+                      << to_string(_ethernet_address) << " / " << _ip_address.ip()
+                      << (_pending_flag ? " [retransmit @5s]" : " [first attempt]");
             _frames_out.push(arp_frame);
 
             _pending_flag = true;
