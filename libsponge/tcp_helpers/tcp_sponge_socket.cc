@@ -1,5 +1,6 @@
 #include "tcp_sponge_socket.hh"
 
+#include "logging.hh"
 #include "network_interface.hh"
 #include "parser.hh"
 #include "tun.hh"
@@ -83,9 +84,8 @@ void TCPSpongeSocket<AdaptT>::_initialize_TCP(const TCPConfig &config) {
 
                             // debugging output:
                             if (_thread_data.eof() and _tcp.value().bytes_in_flight() == 0 and not _fully_acked) {
-                                cerr << "DEBUG: Outbound stream to "
-                                     << _datagram_adapter.config().destination.to_string()
-                                     << " has been fully acknowledged.\n";
+                                LOG_DEBUG << "Outbound stream to " << _datagram_adapter.config().destination.to_string()
+                                          << " has been fully acknowledged.";
                                 _fully_acked = true;
                             }
                         },
@@ -108,9 +108,9 @@ void TCPSpongeSocket<AdaptT>::_initialize_TCP(const TCPConfig &config) {
                 _outbound_shutdown = true;
 
                 // debugging output:
-                cerr << "DEBUG: Outbound stream to " << _datagram_adapter.config().destination.to_string()
-                     << " finished (" << _tcp.value().bytes_in_flight() << " byte"
-                     << (_tcp.value().bytes_in_flight() == 1 ? "" : "s") << " still in flight).\n";
+                LOG_DEBUG << "Outbound stream to " << _datagram_adapter.config().destination.to_string() << " finished ("
+                          << _tcp.value().bytes_in_flight() << " byte"
+                          << (_tcp.value().bytes_in_flight() == 1 ? "" : "s") << " still in flight).";
             }
         },
         [&] { return (_tcp->active()) and (not _outbound_shutdown) and (_tcp->remaining_outbound_capacity() > 0); },
@@ -138,10 +138,10 @@ void TCPSpongeSocket<AdaptT>::_initialize_TCP(const TCPConfig &config) {
                 _inbound_shutdown = true;
 
                 // debugging output:
-                cerr << "DEBUG: Inbound stream from " << _datagram_adapter.config().destination.to_string()
-                     << " finished " << (inbound.error() ? "with an error/reset.\n" : "cleanly.\n");
+                LOG_DEBUG << "Inbound stream from " << _datagram_adapter.config().destination.to_string() << " finished "
+                          << (inbound.error() ? "with an error/reset." : "cleanly.");
                 if (_tcp.value().state() == TCPState::State::TIME_WAIT) {
-                    cerr << "DEBUG: Waiting for lingering segments (e.g. retransmissions of FIN) from peer...\n";
+                    LOG_DEBUG << "Waiting for lingering segments (e.g. retransmissions of FIN) from peer...";
                 }
             }
         },
@@ -180,13 +180,13 @@ template <typename AdaptT>
 TCPSpongeSocket<AdaptT>::~TCPSpongeSocket() {
     try {
         if (_tcp_thread.joinable()) {
-            cerr << "Warning: unclean shutdown of TCPSpongeSocket\n";
+            LOG_WARN << "Unclean shutdown of TCPSpongeSocket";
             // force the other side to exit
             _abort.store(true);
             _tcp_thread.join();
         }
     } catch (const exception &e) {
-        cerr << "Exception destructing TCPSpongeSocket: " << e.what() << endl;
+        LOG_ERROR << "Exception destructing TCPSpongeSocket: " << e.what();
     }
 }
 
@@ -194,9 +194,9 @@ template <typename AdaptT>
 void TCPSpongeSocket<AdaptT>::wait_until_closed() {
     shutdown(SHUT_RDWR);
     if (_tcp_thread.joinable()) {
-        cerr << "DEBUG: Waiting for clean shutdown... ";
+        LOG_DEBUG << "Waiting for clean shutdown...";
         _tcp_thread.join();
-        cerr << "done.\n";
+        LOG_DEBUG << "done.";
     }
 }
 
@@ -212,7 +212,7 @@ void TCPSpongeSocket<AdaptT>::connect(const TCPConfig &c_tcp, const FdAdapterCon
 
     _datagram_adapter.config_mut() = c_ad;
 
-    cerr << "DEBUG: Connecting to " << c_ad.destination.to_string() << "... ";
+    LOG_DEBUG << "Connecting to " << c_ad.destination.to_string() << "...";
     _tcp->connect();
 
     const TCPState expected_state = TCPState::State::SYN_SENT;
@@ -223,7 +223,7 @@ void TCPSpongeSocket<AdaptT>::connect(const TCPConfig &c_tcp, const FdAdapterCon
     }
 
     _tcp_loop([&] { return _tcp->state() == TCPState::State::SYN_SENT; });
-    cerr << "done.\n";
+    LOG_INFO << "Connection established to " << c_ad.destination.to_string() << ".";
 
     _tcp_thread = thread(&TCPSpongeSocket::_tcp_main, this);
 }
@@ -241,12 +241,12 @@ void TCPSpongeSocket<AdaptT>::listen_and_accept(const TCPConfig &c_tcp, const Fd
     _datagram_adapter.config_mut() = c_ad;
     _datagram_adapter.set_listening(true);
 
-    cerr << "DEBUG: Listening for incoming connection... ";
+    LOG_DEBUG << "Listening for incoming connection...";
     _tcp_loop([&] {
         const auto s = _tcp->state();
         return (s == TCPState::State::LISTEN or s == TCPState::State::SYN_RCVD or s == TCPState::State::SYN_SENT);
     });
-    cerr << "new connection from " << _datagram_adapter.config().destination.to_string() << ".\n";
+    LOG_INFO << "New connection from " << _datagram_adapter.config().destination.to_string() << ".";
 
     _tcp_thread = thread(&TCPSpongeSocket::_tcp_main, this);
 }
@@ -260,12 +260,12 @@ void TCPSpongeSocket<AdaptT>::_tcp_main() {
         _tcp_loop([] { return true; });
         shutdown(SHUT_RDWR);
         if (not _tcp.value().active()) {
-            cerr << "DEBUG: TCP connection finished "
-                 << (_tcp.value().state() == TCPState::State::RESET ? "uncleanly" : "cleanly.\n");
+            LOG_DEBUG << "TCP connection finished "
+                      << (_tcp.value().state() == TCPState::State::RESET ? "uncleanly" : "cleanly");
         }
         _tcp.reset();
     } catch (const exception &e) {
-        cerr << "Exception in TCPConnection runner thread: " << e.what() << "\n";
+        LOG_ERROR << "Exception in TCPConnection runner thread: " << e.what();
         throw e;
     }
 }

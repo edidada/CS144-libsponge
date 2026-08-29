@@ -2,6 +2,7 @@
 
 #include "arp_message.hh"
 #include "ethernet_frame.hh"
+#include "logging.hh"
 
 #include <iostream>
 
@@ -22,8 +23,8 @@ using namespace std;
 //! \param[in] ip_address IP (what ARP calls "protocol") address of the interface
 NetworkInterface::NetworkInterface(const EthernetAddress &ethernet_address, const Address &ip_address)
     : _ethernet_address(ethernet_address), _ip_address(ip_address) {
-    cerr << "DEBUG: Network interface has Ethernet address " << to_string(_ethernet_address) << " and IP address "
-         << ip_address.ip() << "\n";
+    LOG_DEBUG << "Network interface has Ethernet address " << to_string(_ethernet_address) << " and IP address "
+              << ip_address.ip();
 }
 
 //! \param[in] dgram the IPv4 datagram to be sent
