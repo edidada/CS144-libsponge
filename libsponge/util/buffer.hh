@@ -30,10 +30,8 @@ class Buffer {
     //!@{
     std::string_view str() const {
         if (not _storage) {
-            std::cout << "Buffer_str" << std::endl;
             return {};
         }
-        std::cout << "Buffer_str2" << std::endl;
         return {_storage->data() + _starting_offset, _storage->size() - _starting_offset};
     }
 
@@ -118,9 +116,7 @@ class BufferViewList {
     //!@{
 
     //! \brief Construct from a std::string
-    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {
-        std::cout << "BufferViewList_&str = " << str << std::endl;
-    }
+    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {}
 
     //! \brief Construct from a C string (must be NULL-terminated)
     BufferViewList(const char *s) : BufferViewList(std::string_view(s)) {}
@@ -130,8 +126,7 @@ class BufferViewList {
 
     //! \brief Construct from a std::string_view
     BufferViewList(std::string_view str) {
-      std::cout << "BufferViewList_string_view = " << str.data() <<"size(),"<<str.size()<< std::endl;
-      _views.push_back({const_cast<char *>(str.data()), str.size()});
+        _views.push_back({const_cast<char *>(str.data()), str.size()});
     }
     //!@}
 

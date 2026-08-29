@@ -63,13 +63,11 @@ class FileDescriptor {
 
     //! Write a string, possibly blocking until all is written
     size_t write(const char *str, const bool write_all = true) {
-        printf("file_descriptor_write*str");
         return write(BufferViewList(str), write_all);
     }
 
     //! Write a string, possibly blocking until all is written
     size_t write(const std::string &str, const bool write_all = true) {
-        printf("file_descriptor_write&str");
         return write(BufferViewList(str), write_all);
     }
 
