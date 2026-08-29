@@ -1,6 +1,7 @@
 #include "tun.hh"
 
 #include "ipv4_datagram.hh"
+#include "logging.hh"
 #include "parser.hh"
 #include "tcp_segment.hh"
 #include "util.hh"
@@ -13,6 +14,7 @@
 using namespace std;
 
 int main() {
+    Logger::get().open_file("logs/tun.log");
     try {
         TunFD tun("tun144");
         while (true) {

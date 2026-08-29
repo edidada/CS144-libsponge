@@ -2013,3 +2013,62 @@ sudo make check_lab6 2>&1 | tee /tmp/check_lab6.log
 *   **`CONNMARK` 的作用**：CS144 的脚本里用 `CONNMARK` 标记数据包，是为了做源地址伪装 (MASQUERADE)，让虚拟网络设备能和外部网络通信。
 
 简单说，**最快的办法就是切换到课程提供的虚拟机上**，能省去很多折腾环境的时间。
+
+---
+
+## 附：Lab 日志系统与对应知识点
+
+### 1. 项目公共日志模块（工业级设计）
+
+Lab 0～6 的所有可执行程序都接入了统一的日志模块 `libsponge/util/logging.hh` / `logging.cc`，无需各程序各自实现：
+
+- **单例模式**：`Logger::get()` 返回全局唯一实例（函数内 `static` 局部对象，C++11 起线程安全地初始化一次）。
+- **一行一条、原子写入**：日志记录类 `Logger::Line` 用流式语法 `LOG_DEBUG << "..."`，析构时在 `std::mutex` 保护下把**完整一行**组装好再一次性写出，多线程（如 `tcp_ipv4` 的收/发线程）日志不会互相交错。
+- **每行包含**：毫秒级时间戳 `[YYYY-MM-DD HH:MM:SS.mmm]`、级别 `[DEBUG/INFO/WARN/ERROR]`、**线程 ID** `[thread 0x…]`、**源码位置** `[文件.cc:行号 完整函数签名(含类名)]`（由 `__FILE__`/`__LINE__`/`__PRETTY_FUNCTION__` 宏捕获）、正文。
+- **级别过滤**：`set_min_level()` 运行时控制输出下限；`LOCAL_DEBUG/INFO/WARN/ERROR` 四级。
+- **双输出**：始终镜像到 stderr（终端可见），同时写入日志文件。
+- **日志轮转**：`open_file(path, 512*1024, 3000)` 默认当文件超过 **500 KB 或 3000 行**时自动归档为 `<path>.<YYYYMMDD-HHMMSS.mmm>`（命名冲突自动追加 `.N`），再新建空文件继续写——对应工业界的 logrotate 思路，避免单个日志无限膨胀。
+- **接入方式**：任何 app 只需两行即可启用：
+  ```cpp
+  #include "logging.hh"
+  // ...
+  Logger::get().open_file("xxx.log");
+  ```
+
+各 Lab 对应的程序与日志文件：
+
+| Lab | 程序 | 日志文件 |
+| --- | --- | --- |
+| Lab 0 | `webget` | `webget.log` |
+| Lab 1/2 | `tcp_native`、`tcpsocket_test` | `tcp_native.log`、`tcpsocket_test.log` |
+| Lab 3 | `tcp_benchmark` | `tcp_benchmark.log` |
+| Lab 4 | `tcp_ipv4` | `tcp_ipv4.log` |
+| Lab 5 | `tcp_udp`、`udp_tcpdump` | `tcp_udp.log`、`udp_tcpdump.log` |
+| Lab 6 | `tcp_ip_ethernet`、`tun` | `tcp_ip_ethernet.log`、`tun.log` |
+
+### 2. 日志信息与 Lab 知识点的对应关系
+
+以 `tcp_ipv4`（Lab 4）访问 `www.baidu.com` 为例，日志中的每条记录都能对应到课本/讲义的知识点：
+
+- `Network interface has Ethernet address … and IP address …` —— Lab 4 的网络接口初始化：网卡有 MAC 地址，同时为接口配置 IP（此处来自 tun 虚拟网卡的 `169.254.10.9`）。
+- `Connecting to 36.152.44.93:80...` + `Connection established …` —— **三次握手**：客户端进入 `SYN_SENT`，收到 `SYN+ACK` 后发送 `ACK` 建立连接；`_tcp_loop` 在握手完成前一直阻塞等待状态迁移。
+- `Outbound stream to … finished (N bytes still in flight)` —— **滑动窗口/发送缓冲**：`bytes_in_flight` = 已发送但未被 ACK 的字节数，对应 Lab 2/3 的 `ByteStream` + 发送方窗口；N 不为 0 说明还有数据在途（FIN 之前必须把窗口里的数据清空）。
+- `Outbound stream … has been fully acknowledged` —— 发送方把整个字节流**全部 ACK** 后才允许进入关闭序列（先发 FIN）。
+- `Inbound stream from … finished cleanly / with an error/reset` —— 接收方向：对端正常 `FIN` 关闭为 *cleanly*；对端发送 `RST` 或收到校验和错误数据则进入错误状态 `error()`，对应 Lab 2 接收方状态机。
+- `Waiting for lingering segments …` —— **TIME_WAIT**：主动关闭方在收到对端 FIN 后进入 TIME_WAIT，等待可能的重传段，再等待 2×MSL 后才彻底关闭。
+- `TCP connection finished uncleanly` —— 连接以 `RST` 重置而非正常四次挥手，通常意味着对端异常或应用未读尽数据（Lab 3 的 `TCPState::State::RESET`）。
+- `Waiting for clean shutdown… done` —— 正常四次挥手（FIN→ACK→FIN→ACK）完成，两侧流都到达关闭状态。
+
+Lab 5/6 的日志补充对应知识点：
+
+- `udp_tcpdump` 的抓包日志 —— Lab 5 用 **UDP 承载 TCP 段**（模拟链路），体现 TCP 段可以封装进任意承载协议（此处为 UDP 数据报）；抓包可观察校验和、序号、ACK 的时序。
+- `tcp_ip_ethernet` / `tun` 的收包日志 —— Lab 6 路由器：从 TAP 设备收 Ethernet 帧 → 解析 ARP/IP → 查路由表转发，日志能直观看到 ARP 解析与转发路径，对应路由表最长前缀匹配（LPM）知识点。
+
+### 3. 本模块涉及的 C++ 技术点
+
+- **单例 + 延迟初始化**：`static Logger instance` 在首次访问时构造，进程退出自动析构。
+- **线程安全**：`std::mutex` + `lock_guard`（RAII 加解锁，异常安全）；时间戳用 `localtime_r`（可重入，替代线程不安全的 `localtime`）。
+- **流式接口**：`Line` 提供模板 `operator<<`，并特化接受 `std::endl`/`std::flush` 等操纵符；对象用右值传递 + move 构造，避免拷贝（C++17 下宏产生的临时对象走 guaranteed copy elision）。
+- **源码位置**：`__FILE__`、`__LINE__`、`__PRETTY_FUNCTION__`（GNU 扩展，输出含类名/模板实参的完整签名）在编译期展开，零运行时开销。
+- **文件流与轮转**：`std::ofstream` 以 `trunc` 模式打开；`tellp()` 读取写入后的文件偏移作为大小判断依据；`std::rename` 原子地归档旧文件，保证新文件立即从零开始。
+- **时间**：`std::chrono::system_clock` + `duration_cast<milliseconds>` 取毫秒；`put_time` 格式化；文件命名时间戳与日志行内时间戳共用一套时钟，便于归档文件与内容的对应。

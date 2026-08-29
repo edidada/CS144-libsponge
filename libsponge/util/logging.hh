@@ -23,14 +23,19 @@ enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
 //!  - thread id, thread-safe (a mutex protects each line's assembly and write)
 //!  - severity levels with a runtime filter
 //!  - writes to an optional log file and always mirrors to stderr
+//!  - log rotation: once the active file exceeds `max_size_bytes` or `max_lines`,
+//!    it is archived as `<path>.<YYYYMMDD-HHMMSS.mmm>` and a fresh file is started
 class Logger {
   public:
     //! Global singleton.
     static Logger &get();
 
     //! Open (truncating) the given log file; empty path closes any file.
-    //! Terminal output stays enabled regardless.
-    void open_file(const std::string &path);
+    //! The file is rotated (archived under a timestamped name) once it grows past
+    //! `max_size_bytes` bytes or `max_lines` lines. Terminal output stays enabled.
+    void open_file(const std::string &path,
+                   const size_t max_size_bytes = 512 * 1024,
+                   const size_t max_lines = 3000);
 
     //! Set the minimum severity that will be emitted.
     void set_min_level(const LogLevel level);
@@ -73,10 +78,20 @@ class Logger {
     friend class Line;
 
     static std::string timestamp();
+    static std::string compact_timestamp();
     static const char *level_tag(const LogLevel level);
+    static bool file_exists(const std::string &name);
+
+    //! Archive the current file under a timestamped name and start a fresh one.
+    //! Must be called with mutex_ already held.
+    void rotate_locked();
 
     std::mutex mutex_;
     std::ofstream file_;
+    std::string path_;
+    size_t max_size_{512 * 1024};
+    size_t max_lines_{3000};
+    size_t line_count_{0};
     bool terminal_{true};
     LogLevel min_level_{LogLevel::DEBUG};
 };

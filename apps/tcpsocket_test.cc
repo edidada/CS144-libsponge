@@ -1,3 +1,4 @@
+#include "logging.hh"
 #include "tcp_sponge_socket.hh"
 #include "util.hh"
 
@@ -7,6 +8,7 @@
 using namespace std;
 
 int main() {
+    Logger::get().open_file("logs/tcpsocket_test.log");
     const uint16_t portnum = ((std::random_device()()) % 50000) + 1025;
 
     // create a TCP socket, bind it to a local address, and listen

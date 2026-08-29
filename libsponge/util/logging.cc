@@ -1,23 +1,35 @@
 #include "logging.hh"
 
+#include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 
 using namespace std;
 
-Logger::Logger() : mutex_(), file_(), terminal_(true), min_level_(LogLevel::DEBUG) {}
+Logger::Logger()
+    : mutex_(), file_(), path_(), max_size_(512 * 1024), max_lines_(3000), line_count_(0), terminal_(true),
+      min_level_(LogLevel::DEBUG) {}
 
 Logger &Logger::get() {
     static Logger instance;
     return instance;
 }
 
-void Logger::open_file(const string &path) {
+void Logger::open_file(const string &path, const size_t max_size_bytes, const size_t max_lines) {
     lock_guard<mutex> lock(mutex_);
     file_.close();
-    if (not path.empty()) {
-        file_.open(path, ios::trunc);
+    path_ = path;
+    max_size_ = max_size_bytes;
+    max_lines_ = max_lines;
+    line_count_ = 0;
+    if (not path_.empty()) {
+        const auto parent = filesystem::path(path_).parent_path();
+        if (not parent.empty()) {
+            filesystem::create_directories(parent);
+        }
+        file_.open(path_, ios::trunc);
     }
 }
 
@@ -37,6 +49,17 @@ string Logger::timestamp() {
     return ss.str();
 }
 
+string Logger::compact_timestamp() {
+    const auto now = chrono::system_clock::now();
+    const auto millis = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+    const time_t t = chrono::system_clock::to_time_t(now);
+    tm tmv{};
+    localtime_r(&t, &tmv);  // thread-safe on POSIX
+    ostringstream ss;
+    ss << put_time(&tmv, "%Y%m%d-%H%M%S") << '-' << setw(3) << setfill('0') << millis;
+    return ss.str();
+}
+
 const char *Logger::level_tag(const LogLevel level) {
     switch (level) {
         case LogLevel::DEBUG:
@@ -49,6 +72,28 @@ const char *Logger::level_tag(const LogLevel level) {
             return "ERROR";
     }
     return "?????";
+}
+
+bool Logger::file_exists(const string &name) {
+    ifstream probe(name);
+    return probe.good();
+}
+
+void Logger::rotate_locked() {
+    if (not file_.is_open() or path_.empty()) {
+        return;
+    }
+    file_.close();
+
+    // archive as <path>.<YYYYMMDD-HHMMSS.mmm>; append .N if the name is taken
+    string archived = path_ + "." + compact_timestamp();
+    for (int seq = 2; file_exists(archived); ++seq) {
+        archived = path_ + "." + compact_timestamp() + "." + to_string(seq);
+    }
+    rename(path_.c_str(), archived.c_str());
+
+    line_count_ = 0;
+    file_.open(path_, ios::trunc);
 }
 
 Logger::Line::Line(Logger &logger, const LogLevel level, const char *file, const int line, const char *func)
@@ -80,5 +125,12 @@ Logger::Line::~Line() {
     if (logger_.file_.is_open()) {
         logger_.file_ << record.str();
         logger_.file_.flush();
+
+        // rotate when the active file is too large or too long
+        ++logger_.line_count_;
+        const auto size_ok = logger_.file_.tellp() >= 0 && logger_.file_.tellp() < static_cast<streamoff>(logger_.max_size_);
+        if (not size_ok or logger_.line_count_ >= logger_.max_lines_) {
+            logger_.rotate_locked();
+        }
     }
 }

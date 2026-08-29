@@ -1,4 +1,5 @@
 #include "bidirectional_stream_copy.hh"
+#include "logging.hh"
 #include "tcp_config.hh"
 #include "tcp_sponge_socket.hh"
 #include "tun.hh"
@@ -135,6 +136,7 @@ static tuple<TCPConfig, FdAdapterConfig, bool, char *> get_config(int argc, char
 }
 
 int main(int argc, char **argv) {
+    Logger::get().open_file("logs/tcp_ipv4.log");
     try {
         if (argc < 3) {
             show_usage(argv[0], "ERROR: required arguments are missing.");
