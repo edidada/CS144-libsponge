@@ -84,10 +84,10 @@ lab1
 正确序列中的字节数。
 2.在实验室2中，您将实现TCP中处理入站字节流的部分：
 TCPR接收器。这涉及到思考TCP将如何表示每个字节的位置
-在流中——称为“序列号”。TCPReceiver负责
+在流中——称为"序列号"。TCPReceiver负责
 告诉发送者（a）它能够组装多少入站字节流
-成功（这被称为“确认”）和（b）发送者还有多少字节
-允许立即发送（“流量控制”）。
+成功（这被称为"确认"）和（b）发送者还有多少字节
+允许立即发送（"流量控制"）。
 3.在实验室3中，您将实现TCP中处理出站字节流的部分：
 TCPSender。当发送者怀疑它传输的片段时，它应该如何反应
 一路上迷路了，却一直没有找到接收器？什么时候再试一次
@@ -229,8 +229,833 @@ you cannot change its public interface
 
 lab2
 
-We’ve defined the type for you and provided some helper functions (see wrapping integers.hh),
-but you’ll implement the conversions in wrapping integers.cc
+We've defined the type for you and provided some helper functions (see wrapping integers.hh),
+but you'll implement the conversions in wrapping integers.cc
+
+---
+
+# 康宇PL《Stanford CS144 Lab Assignments 学习笔记》整理
+
+> 来源：https://www.cnblogs.com/kangyupl/p/stanford_cs144_labs.html
+> 已过滤 gdb / gcc / vscode 调试相关内容（本机用 Clion + 命令行调试）。
+> 备注：所有测试样例的命令都在 `etc/tests.cmake` 中定义，测试程序源文件在 `tests/` 下，直接运行 `build/tests/<测试程序名>` 即可命令行调试。
+
+## LAB2
+
+### Sequence Numbers
+
+要求实现序列号、绝对序列号与流索引间的转换。照着讲义的表格写就行：
+
+|  | Sequence Numbers | Absolute Sequence Numbers | Stream Indices |
+| --- | --- | --- | --- |
+| 起点 | Start at the ISN | Start at 0 | Start at 0 |
+| 是否包含 SYN/FIN | Include SYN/FIN | Include SYN/FIN | Omit SYN/FIN |
+| 位数/是否回绕 | 32 bits, wrapping | 64 bits, non-wrapping | 64 bits, non-wrapping |
+| 名称 | "seqno" | "absolute seqno" | "stream index" |
+
+需要提一下的地方有 `checkpoint` 表示最近一次转换求得的 `absolute seqno`，而本次转换出的 `absolute seqno` 应该选择与上次值最为接近的那一个。原理是虽然 segment 不一定按序到达，但几乎不可能出现相邻到达的两个 segment 序号差值超过 `INT32_MAX` 的情况，除非延迟以年为单位，或者产生了比特差错（后面的 LAB 可能涉及）。
+
+实际操作就是把算出来的绝对序号分别加减 `1ul << 32` 做比较，选择与 `checkpoint` 差的绝对值最小的那个。
+
+wrapping_integers.cc
+
+```cpp
+WrappingInt32 wrap(uint64_t n, WrappingInt32 isn) {
+    return WrappingInt32(static_cast<uint32_t>(n) + isn.raw_value());
+}
+
+uint64_t unwrap(WrappingInt32 n, WrappingInt32 isn, uint64_t checkpoint) {
+    uint32_t offset = n.raw_value() - isn.raw_value();
+    uint64_t t = (checkpoint & 0xFFFFFFFF00000000) + offset;
+    uint64_t ret = t;
+    if (abs(int64_t(t + (1ul << 32) - checkpoint)) < abs(int64_t(t - checkpoint)))
+        ret = t + (1ul << 32);
+    if (t >= (1ul << 32) && abs(int64_t(t - (1ul << 32) - checkpoint)) < abs(int64_t(ret - checkpoint)))
+        ret = t - (1ul << 32);
+    return ret;
+}
+```
+
+### Implementing the TCP receiver
+
+要求实现一个基于滑动窗口的 TCP 接收端，类似于《计算机网络：自顶向下方法》里的选择重传协议，不过多了点小细节：
+
+整个接收端的空间由窗口空间（基于 StreamReassembler）和缓冲区空间（基于 ByteStream）两部分共享。需要注意**窗口长度等于接收端容量减去还留在缓冲区的字节数**，只有当字节从缓冲区读出后窗口长度才能缩减。
+
+这节的数据结构部分在前两个 LAB 已经实现完了，只要写点业务逻辑就行，就是琐碎的细节多了点，需要疯狂调试疯狂修改。为了达成本节任务，在 StreamReassembler 里加了俩 getter 接口：
+
+stream_reassembler.hh
+
+```cpp
+class StreamReassembler {
+public:
+    size_t head_index() const { return _head_index; }
+    bool input_ended() const { return _output.input_ended(); }
+    //......
+}
+```
+
+tcp_receiver.hh
+
+```cpp
+class TCPReceiver {
+private:
+    //! Our data structure for re-assembling bytes.
+    StreamReassembler _reassembler;
+    bool _syn_flag = false;
+    bool _fin_flag = false;
+    size_t _base = 0;  // when uninitial, equal zero for ackno special judge
+    size_t _isn = 0;
+    //! The maximum number of bytes we'll store.
+    size_t _capacity;
+    //......
+}
+```
+
+tcp_receiver.cc
+
+```cpp
+bool TCPReceiver::segment_received(const TCPSegment &seg) {
+    bool ret = false;
+    static size_t abs_seqno = 0;
+    size_t length;
+    if (seg.header().syn) {
+        if (_syn_flag) {  // already get a SYN, refuse other SYN.
+            return false;
+        }
+        _syn_flag = true;
+        ret = true;
+        _isn = seg.header().seqno.raw_value();
+        abs_seqno = 1;
+        _base = 1;
+        length = seg.length_in_sequence_space() - 1;
+        if (length == 0) {  // segment's content only have a SYN flag
+            return true;
+        }
+    } else if (!_syn_flag) {  // before get a SYN, refuse any segment
+        return false;
+    } else {  // not a SYN segment, compute it's abs_seqno
+        abs_seqno = unwrap(WrappingInt32(seg.header().seqno.raw_value()), WrappingInt32(_isn), abs_seqno);
+        length = seg.length_in_sequence_space();
+    }
+
+    if (seg.header().fin) {
+        if (_fin_flag) {  // already get a FIN, refuse other FIN
+            return false;
+        }
+        _fin_flag = true;
+        ret = true;
+    }
+    // not FIN and not one size's SYN, check border
+    else if (seg.length_in_sequence_space() == 0 && abs_seqno == _base) {
+        return true;
+    } else if (abs_seqno >= _base + window_size() || abs_seqno + length <= _base) {
+        if (!ret)
+            return false;
+    }
+
+    _reassembler.push_substring(seg.payload().copy(), abs_seqno - 1, seg.header().fin);
+    _base = _reassembler.head_index() + 1;
+    if (_reassembler.input_ended())  // FIN be count as one byte
+        _base++;
+    return true;
+}
+
+optional<WrappingInt32> TCPReceiver::ackno() const {
+    if (_base > 0)
+        return WrappingInt32(wrap(_base, WrappingInt32(_isn)));
+    else
+        return std::nullopt;
+}
+
+size_t TCPReceiver::window_size() const { return _capacity - _reassembler.stream_out().buffer_size(); }
+```
+
+## LAB3
+
+这节课实现的是 TCP 的发送方，难度比上节要高一些。记录一下迷惑的几个点：
+
+1. **分别确认 vs 累计确认**：课本上描述选择重传的图用的是"分别确认"协议，即发送方收到一个 ackno 只代表接收方收到了该 ackno 对应的那个段。而本 lab 用的是基于"累计确认"的 ARQ 协议，即发送方收到一个 ackno 代表接收方已经收到 ackno 之前的所有段。换成累计确认就简单多了，直接一个 queue 就行，重传的时候只传头就行。
+
+2. **首个段应是只包含 SYN 的段**，用作第一次握手。课本里是这么讲的，但讲义里没说，所以作者按首个段也可以存数据的逻辑写了不少错代码。
+
+3. **计时器启动的时机**。讲义里在多个地方都提到了重启计时器，容易混乱。推荐课本里的图 3-33。
+
+tcp_sender.hh
+
+```cpp
+class TCPSender {
+private:
+    //......
+
+    std::queue<TCPSegment> _segments_outstanding{};
+    size_t _bytes_in_flight = 0;
+    size_t _recv_ackno = 0;
+    bool _syn_flag = false;
+    bool _fin_flag = false;
+    size_t _window_size = 0;
+
+    size_t _timer = 0;
+    bool _timer_running = false;
+    size_t _retransmission_timeout = 0;
+    size_t _consecutive_retransmission = 0;
+
+    void send_segment(TCPSegment &seg);
+    //......
+}
+```
+
+tcp_sender.cc
+
+```cpp
+TCPSender::TCPSender(const size_t capacity, const uint16_t retx_timeout, const std::optional<WrappingInt32> fixed_isn)
+    : _isn(fixed_isn.value_or(WrappingInt32{random_device()()}))
+    , _initial_retransmission_timeout{retx_timeout}
+    , _stream(capacity)
+    , _retransmission_timeout(retx_timeout) {}
+
+uint64_t TCPSender::bytes_in_flight() const { return _bytes_in_flight; }
+
+void TCPSender::fill_window(bool send_syn) {
+    // sent a SYN before sent other segment
+    if (!_syn_flag) {
+        if (send_syn) {
+            TCPSegment seg;
+            seg.header().syn = true;
+            send_segment(seg);
+            _syn_flag = true;
+        }
+        return;
+    }
+
+    // take window_size as 1 when it equal 0
+    size_t win = _window_size > 0 ? _window_size : 1;
+    size_t remain;  // window's free space
+    // when window isn't full and never sent FIN
+    while ((remain = win - (_next_seqno - _recv_ackno)) != 0 && !_fin_flag) {
+        size_t size = min(TCPConfig::MAX_PAYLOAD_SIZE, remain);
+        TCPSegment seg;
+        string str = _stream.read(size);
+        seg.payload() = Buffer(std::move(str));
+        // add FIN
+        if (seg.length_in_sequence_space() < win && _stream.eof()) {
+            seg.header().fin = true;
+            _fin_flag = true;
+        }
+        // stream is empty
+        if (seg.length_in_sequence_space() == 0) {
+            return;
+        }
+        send_segment(seg);
+    }
+}
+
+bool TCPSender::ack_received(const WrappingInt32 ackno, const uint16_t window_size) {
+    size_t abs_ackno = unwrap(ackno, _isn, _recv_ackno);
+    // out of window, invalid ackno
+    if (abs_ackno > _next_seqno) {
+        return false;
+    }
+
+    // if ackno is legal, modify _window_size before return
+    _window_size = window_size;
+
+    // ack has been received
+    if (abs_ackno <= _recv_ackno) {
+        return true;
+    }
+    _recv_ackno = abs_ackno;
+
+    // pop all element before ackno
+    while (!_segments_outstanding.empty()) {
+        TCPSegment seg = _segments_outstanding.front();
+        if (unwrap(seg.header().seqno, _isn, _next_seqno) + seg.length_in_sequence_space() <= abs_ackno) {
+            _bytes_in_flight -= seg.length_in_sequence_space();
+            _segments_outstanding.pop();
+        } else {
+            break;
+        }
+    }
+
+    fill_window();
+
+    _retransmission_timeout = _initial_retransmission_timeout;
+    _consecutive_retransmission = 0;
+
+    // if have other outstanding segment, restart timer
+    if (!_segments_outstanding.empty()) {
+        _timer_running = true;
+        _timer = 0;
+    }
+    return true;
+}
+
+void TCPSender::tick(const size_t ms_since_last_tick) {
+    _timer += ms_since_last_tick;
+    if (_timer >= _retransmission_timeout && !_segments_outstanding.empty()) {
+        _segments_out.push(_segments_outstanding.front());
+        _consecutive_retransmission++;
+        _retransmission_timeout *= 2;
+        _timer_running = true;
+        _timer = 0;
+    }
+    if (_segments_outstanding.empty()) {
+        _timer_running = false;
+    }
+}
+
+unsigned int TCPSender::consecutive_retransmissions() const { return _consecutive_retransmission; }
+
+void TCPSender::send_empty_segment() {
+    // empty segment doesn't need store to outstanding queue
+    TCPSegment seg;
+    seg.header().seqno = wrap(_next_seqno, _isn);
+    _segments_out.push(seg);
+}
+
+void TCPSender::send_empty_segment(WrappingInt32 seqno) {
+    // empty segment doesn't need store to outstanding queue
+    TCPSegment seg;
+    seg.header().seqno = seqno;
+    _segments_out.push(seg);
+}
+
+void TCPSender::send_segment(TCPSegment &seg) {
+    seg.header().seqno = wrap(_next_seqno, _isn);
+    _next_seqno += seg.length_in_sequence_space();
+    _bytes_in_flight += seg.length_in_sequence_space();
+    _segments_outstanding.push(seg);
+    _segments_out.push(seg);
+    if (!_timer_running) {  // start timer
+        _timer_running = true;
+        _timer = 0;
+    }
+}
+```
+
+## LAB4
+
+这节课要求实现一个 `TCPConnection` 类，主要功能有：封装 `TCPSender` 和 `TCPReceiver`；构建 TCP 的有限状态机（FSM）。虽然讲义里说这节课不需要设计啥新东西，只要拼拼凑凑就行，但实际实现难度比前四个实验加起来还难。主要难点在于 TCP 的 FSM 涉及到 12 种状态间的转换，需要很多的细节逻辑来控制。并且因为"面向样例编程"的问题，LAB4 之前的几个 LAB 的测试样例并非"全面"的，到了 LAB4 再给你套"完备"的测试，导致很多前几个 LAB 潜在的 BUG 都集中在 LAB4 里爆发出来，需要修改前面实现过的代码才行。
+
+思路分析：把 TCP 的 FSM 吃透、把讲义完全吃透、把官网 FAQ 里的东西吃透、把 `libsponge/tcp_helpers/tcp_state.cc` 吃透，然后疯狂的改 BUG 吧。大部分时间都会花在研究下面这三幅图上（TCP 状态转换图）：
+
+![TCP FSM](https://img2020.cnblogs.com/blog/1608954/202009/1608954-20200914214811368-1051035388.png)
+![TCP FSM](https://img2020.cnblogs.com/blog/1608954/202009/1608954-20200914214818554-10014625.png)
+![TCP FSM](https://img2020.cnblogs.com/blog/1608954/202009/1608954-20200914214827124-2104730079.png)
+
+### tun.cc 编译错误
+
+如果编译时爆出如下错误（`field 'ifru_addr' has incomplete type 'sockaddr'`）：
+
+```
+[  5%] Building CXX object libsponge/CMakeFiles/sponge.dir/util/tun.cc.o
+In file included from /home/kang/sponge/libsponge/util/tun.cc:8:
+/usr/include/linux/if.h:211:19: error: field 'ifru_addr' has incomplete type 'sockaddr'
+struct sockaddr ifru_addr;
+```
+
+参考 [osquery issue #277](https://github.com/osquery/osquery/issues/277)，在 `libsponge/util/tun.cc` 中添加：
+
+```cpp
+#include <sys/socket.h>
+```
+
+### make check 超时或随机几个样例报错
+
+因为 webget 测试网站服务器在国外（天朝特色网络问题），多重试几次吧。如果还有错那就是系统问题了。
+
+最终代码：
+
+tcp_connection.hh
+
+```cpp
+class TCPConnection {
+private:
+    //......
+
+    size_t _time_since_last_segment_received = 0;
+    bool _active = true;
+    bool _need_send_rst = false;
+    bool _ack_for_fin_sent = false;
+
+    bool push_segments_out(bool send_syn = false);
+    void unclean_shutdown(bool send_rst);
+    bool clean_shutdown();
+    bool in_listen();
+    bool in_syn_recv();
+    bool in_syn_sent();
+    //.......
+}
+```
+
+tcp_connection.cc
+
+```cpp
+size_t TCPConnection::remaining_outbound_capacity() const { return _sender.stream_in().remaining_capacity(); }
+
+size_t TCPConnection::bytes_in_flight() const { return _sender.bytes_in_flight(); }
+
+size_t TCPConnection::unassembled_bytes() const { return _receiver.unassembled_bytes(); }
+
+size_t TCPConnection::time_since_last_segment_received() const { return _time_since_last_segment_received; }
+
+void TCPConnection::segment_received(const TCPSegment &seg) {
+    if (!_active)
+        return;
+    _time_since_last_segment_received = 0;
+
+    // data segments with acceptable ACKs should be ignored in SYN_SENT
+    if (in_syn_sent() && seg.header().ack && seg.payload().size() > 0) {
+        return;
+    }
+    bool send_empty = false;
+    if (_sender.next_seqno_absolute() > 0 && seg.header().ack) {
+        // unacceptable ACKs should produced a segment that existed
+        if (!_sender.ack_received(seg.header().ackno, seg.header().win)) {
+            send_empty = true;
+        }
+    }
+
+    bool recv_flag = _receiver.segment_received(seg);
+    if (!recv_flag) {
+        send_empty = true;
+    }
+
+    if (seg.header().syn && _sender.next_seqno_absolute() == 0) {
+        connect();
+        return;
+    }
+
+    if (seg.header().rst) {
+        // RST segments without ACKs should be ignored in SYN_SENT
+        if (in_syn_sent() && !seg.header().ack) {
+            return;
+        }
+        unclean_shutdown(false);
+        return;
+    }
+
+    if (seg.length_in_sequence_space() > 0) {
+        send_empty = true;
+    }
+
+    if (send_empty) {
+        if (_receiver.ackno().has_value() && _sender.segments_out().empty()) {
+            _sender.send_empty_segment();
+        }
+    }
+    push_segments_out();
+}
+
+bool TCPConnection::active() const { return _active; }
+
+size_t TCPConnection::write(const string &data) {
+    size_t ret = _sender.stream_in().write(data);
+    push_segments_out();
+    return ret;
+}
+
+void TCPConnection::tick(const size_t ms_since_last_tick) {
+    if (!_active)
+        return;
+    _time_since_last_segment_received += ms_since_last_tick;
+    _sender.tick(ms_since_last_tick);
+    if (_sender.consecutive_retransmissions() > TCPConfig::MAX_RETX_ATTEMPTS) {
+        unclean_shutdown(true);
+    }
+    push_segments_out();
+}
+
+void TCPConnection::end_input_stream() {
+    _sender.stream_in().end_input();
+    push_segments_out();
+}
+
+void TCPConnection::connect() {
+    // when connect, must active send a SYN
+    push_segments_out(true);
+}
+
+TCPConnection::~TCPConnection() {
+    try {
+        if (active()) {
+            // Your code here: need to send a RST segment to the peer
+            cerr << "Warning: Unclean shutdown of TCPConnection\n";
+            unclean_shutdown(true);
+        }
+    } catch (const exception &e) {
+        std::cerr << "Exception destructing TCP FSM: " << e.what() << std::endl;
+    }
+}
+
+bool TCPConnection::push_segments_out(bool send_syn) {
+    // default not send syn before recv a SYN
+    _sender.fill_window(send_syn || in_syn_recv());
+    TCPSegment seg;
+    while (!_sender.segments_out().empty()) {
+        seg = _sender.segments_out().front();
+        _sender.segments_out().pop();
+        if (_receiver.ackno().has_value()) {
+            seg.header().ack = true;
+            seg.header().ackno = _receiver.ackno().value();
+            seg.header().win = _receiver.window_size();
+        }
+        if (_need_send_rst) {
+            _need_send_rst = false;
+            seg.header().rst = true;
+        }
+        _segments_out.push(seg);
+    }
+    clean_shutdown();
+    return true;
+}
+
+void TCPConnection::unclean_shutdown(bool send_rst) {
+    _receiver.stream_out().set_error();
+    _sender.stream_in().set_error();
+    _active = false;
+    if (send_rst) {
+        _need_send_rst = true;
+        if (_sender.segments_out().empty()) {
+            _sender.send_empty_segment();
+        }
+        push_segments_out();
+    }
+}
+
+bool TCPConnection::clean_shutdown() {
+    if (_receiver.stream_out().input_ended() && !(_sender.stream_in().eof())) {
+        _linger_after_streams_finish = false;
+    }
+    if (_sender.stream_in().eof() && _sender.bytes_in_flight() == 0 && _receiver.stream_out().input_ended()) {
+        if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+            _active = false;
+        }
+    }
+    return !_active;
+}
+
+bool TCPConnection::in_listen() { return !_receiver.ackno().has_value() && _sender.next_seqno_absolute() == 0; }
+
+bool TCPConnection::in_syn_recv() { return _receiver.ackno().has_value() && !_receiver.stream_out().input_ended(); }
+
+bool TCPConnection::in_syn_sent() {
+    return _sender.next_seqno_absolute() > 0 && _sender.bytes_in_flight() == _sender.next_seqno_absolute();
+}
+```
+
+通关截图：
+
+![ALL PASS](https://img2020.cnblogs.com/blog/1608954/202009/1608954-20200914211818740-1273941540.png)
+
+性能测试结果（作者机器，WSL i5-6200U 与阿里云主机 E5-2682 v4）：
+
+```
+$ ./apps/tcp_benchmark
+CPU-limited throughput                : 0.67 Gbit/s
+CPU-limited throughput with reordering: 0.52 Gbit/s
+```
+
+已超过讲义要求的最低性能 0.1 Gbit/s，宣告完工。
+
+## 瓶颈优化
+
+虽然讲义要求最低达到 0.1 Gbit/s 即可，可讲义里的示例是效率的数倍（1.78 Gbit/s / 1.21 Gbit/s）。为了挑战这一数值需要利用《深入理解计算机系统》中性能优化的知识。
+
+第一步，查找性能瓶颈：修改 `etc/cflags.cmake` 中的编译参数，将 `-g` 改为 `-Og -pg`，使生成的程序具有分析程序可用的链接信息。然后编译并执行 `benchmark` 程序，将 gprof 分析结果写入文本中：
+
+```
+make -j8
+./apps/tcp_benchmark
+gprof ./apps/tcp_benchmark > prof.txt
+```
+
+可以看到 `write`、`pop`、`peek` 三个操作公共占据了 80% 左右的运行时间，所以主要对 `ByteStream` 类进行优化。
+
+补一通 `std::move`、`assign`、右值引用等 C++11 新特性后，翻 `libsponge/util/buffer.cc` 的源码，终于领悟到要用里面的 `BufferList` 类来作为 `ByteStream` 的容器，使原来基于**内存拷贝**的存储方法变为基于**内存所有权转移**的存储方法。注意 `BufferList` 没有示例，使用方法只能多看看源码。
+
+最终代码：
+
+byte_stream.hh
+
+```cpp
+#include "util/buffer.hh"
+class ByteStream {
+private:
+    BufferList _buffer = {};
+    //......
+}
+```
+
+byte_stream.cc
+
+```cpp
+size_t ByteStream::write(const string &data) {
+    size_t len = data.length();
+    if (len > _capacity - _buffer.size()) {
+        len = _capacity - _buffer.size();
+    }
+    _write_count += len;
+    _buffer.append(BufferList(move(string().assign(data.begin(), data.begin() + len))));
+    return len;
+}
+
+string ByteStream::peek_output(const size_t len) const {
+    size_t length = len;
+    if (length > _buffer.size()) {
+        length = _buffer.size();
+    }
+    string s = _buffer.concatenate();
+    return string().assign(s.begin(), s.begin() + length);
+}
+
+void ByteStream::pop_output(const size_t len) {
+    size_t length = len;
+    if (length > _buffer.size()) {
+        length = _buffer.size();
+    }
+    _read_count += length;
+    _buffer.remove_prefix(length);
+    return;
+}
+```
+
+最终成绩（作者机器）：
+
+```
+$ ./apps/tcp_benchmark
+CPU-limited throughput                : 1.84 Gbit/s
+CPU-limited throughput with reordering: 0.64 Gbit/s
+```
+
+优化后的代码在阿里云主机上达到了讲义所给示例的水平（1.83 / 1.14 Gbit/s），本地的 reordering 能力比云主机差半截，换了几台 Ubuntu 测试始终不高，可能是 Ubuntu 特性。
+
+## LAB5
+
+这节要求实现一个 ARP 协议，在网络层与链路层间搭个桥，难度比 LAB4 低很多。参考文章：[ARP详解](https://blog.csdn.net/lm409/article/details/80299823)。
+
+需要提一下的地方：发送一个 `ARP request` 后，如果没有响应要五秒后重发，且在上一个请求被正常响应之前其他的请求都要排在后面。讲义里并没有提到这一点。
+
+network_interface.hh
+
+```cpp
+class NetworkInterface {
+private:
+    //......
+
+    struct arp_item {
+        EthernetAddress mac;
+        size_t ttl;
+    };
+    struct waiting_frame {
+        EthernetFrame frame;
+        uint32_t ip;
+    };
+    std::map<uint32_t, arp_item> _table{};
+    std::queue<waiting_frame> _frames_waiting{};
+    std::queue<uint32_t> _pending_arg{};
+    bool _pending_flag = false;
+    size_t _pending_timer = 0;
+    size_t _timer = 0;
+
+    bool _ethernet_address_equal(EthernetAddress addr1, EthernetAddress addr2);
+    void _retransmission_arp_frame();
+    //......
+}
+```
+
+network_interface.cc
+
+```cpp
+void NetworkInterface::send_datagram(const InternetDatagram &dgram, const Address &next_hop) {
+    // convert IP address of next hop to raw 32-bit representation (used in ARP header)
+    const uint32_t next_hop_ip = next_hop.ipv4_numeric();
+    EthernetFrame frame;
+    frame.header().type = EthernetHeader::TYPE_IPv4;
+    frame.header().src = _ethernet_address;
+    frame.payload() = move(dgram.serialize());
+    if (_table.count(next_hop_ip) && _timer <= _table[next_hop_ip].ttl) {
+        frame.header().dst = _table[next_hop_ip].mac;
+        _frames_out.push(frame);
+    } else {
+        _pending_arg.push(next_hop_ip);
+        _retransmission_arp_frame();
+        _frames_waiting.push({frame, next_hop_ip});
+    }
+}
+
+optional<InternetDatagram> NetworkInterface::recv_frame(const EthernetFrame &frame) {
+    if (!_ethernet_address_equal(frame.header().dst, ETHERNET_BROADCAST) &&
+        !_ethernet_address_equal(frame.header().dst, _ethernet_address)) {
+        return nullopt;
+    } else if (frame.header().type == EthernetHeader::TYPE_IPv4) {
+        InternetDatagram dgram;
+        if (dgram.parse(frame.payload()) == ParseResult::NoError) {
+            return dgram;
+        } else {
+            return nullopt;
+        }
+    } else if (frame.header().type == EthernetHeader::TYPE_ARP) {
+        ARPMessage msg;
+        if (msg.parse(frame.payload()) == ParseResult::NoError) {
+            uint32_t ip = msg.sender_ip_address;
+            _table[ip].mac = msg.sender_ethernet_address;
+            _table[ip].ttl = _timer + 30 * 1000;  // active mappings last 30 seconds
+            if (msg.opcode == ARPMessage::OPCODE_REQUEST && msg.target_ip_address == _ip_address.ipv4_numeric()) {
+                ARPMessage reply;
+                reply.opcode = ARPMessage::OPCODE_REPLY;
+                reply.sender_ethernet_address = _ethernet_address;
+                reply.sender_ip_address = _ip_address.ipv4_numeric();
+                reply.target_ethernet_address = msg.sender_ethernet_address;
+                reply.target_ip_address = msg.sender_ip_address;
+
+                EthernetFrame arp_frame;
+                arp_frame.header().type = EthernetHeader::TYPE_ARP;
+                arp_frame.header().src = _ethernet_address;
+                arp_frame.header().dst = msg.sender_ethernet_address;
+                arp_frame.payload() = move(reply.serialize());
+                _frames_out.push(arp_frame);
+            }
+            while (!_pending_arg.empty()) {
+                uint32_t t_ip = _pending_arg.front();
+                if (_table.count(t_ip) && _timer <= _table[t_ip].ttl) {
+                    _pending_arg.pop();
+                    _pending_flag = false;
+                } else {
+                    break;
+                }
+            }
+            while (!_frames_waiting.empty()) {
+                waiting_frame node = _frames_waiting.front();
+                if (_table.count(node.ip) && _timer <= _table[node.ip].ttl) {
+                    node.frame.header().dst = _table[node.ip].mac;
+                    _frames_waiting.pop();
+                    _frames_out.push(move(node.frame));
+                } else {
+                    break;
+                }
+            }
+        } else {
+            return nullopt;
+        }
+    }
+    return nullopt;
+}
+
+void NetworkInterface::tick(const size_t ms_since_last_tick) {
+    _timer += ms_since_last_tick;
+    _retransmission_arp_frame();
+}
+
+bool NetworkInterface::_ethernet_address_equal(EthernetAddress addr1, EthernetAddress addr2) {
+    for (int i = 0; i < 6; i++) {
+        if (addr1[i] != addr2[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void NetworkInterface::_retransmission_arp_frame() {
+    if (!_pending_arg.empty()) {
+        // pending mappings last five seconds
+        if (!_pending_flag || (_pending_flag && _timer - _pending_timer >= 5000)) {
+            uint32_t ip = _pending_arg.front();
+
+            ARPMessage msg;
+            msg.opcode = ARPMessage::OPCODE_REQUEST;
+            msg.sender_ethernet_address = _ethernet_address;
+            msg.sender_ip_address = _ip_address.ipv4_numeric();
+            msg.target_ethernet_address = {0, 0, 0, 0, 0, 0};
+            msg.target_ip_address = ip;
+
+            EthernetFrame arp_frame;
+            arp_frame.header().type = EthernetHeader::TYPE_ARP;
+            arp_frame.header().src = _ethernet_address;
+            arp_frame.header().dst = ETHERNET_BROADCAST;
+            arp_frame.payload() = move(msg.serialize());
+
+            _frames_out.push(arp_frame);
+
+            _pending_flag = true;
+            _pending_timer = _timer;
+        }
+    }
+}
+```
+
+## LAB6
+
+这节要求实现基于最长前缀匹配规则的路由器转发功能。难度大概比 LAB0 还要简单一点。
+
+因为讲义里讲这次实验即便是 O(N) 的时间复杂度也完全可以接受，所以直接用 vector 作为路由转发表的容器。
+
+此外需要注意：当 `next_hop` 为空的时候代表该路由器为目的路由器，此时 `next_hop` 取 `dgram` 的目的 IP 地址。
+
+router.hh
+
+```cpp
+class Router {
+private:
+    //.......
+
+    struct RouteItem {
+        uint32_t route_prefix = 0;
+        uint8_t prefix_length = 0;
+        std::optional<Address> next_hop = std::nullopt;
+        size_t interface_num = 0;
+    };
+    std::vector<RouteItem> _route_list{};
+
+    bool prefix_equal(uint32_t ip1, uint32_t ip2, uint8_t len);
+    //.......
+}
+```
+
+router.cc
+
+```cpp
+void Router::add_route(const uint32_t route_prefix,
+                       const uint8_t prefix_length,
+                       const optional<Address> next_hop,
+                       const size_t interface_num) {
+    _route_list.push_back(RouteItem{route_prefix, prefix_length, next_hop, interface_num});
+}
+
+void Router::route_one_datagram(InternetDatagram &dgram) {
+    bool route_found = false;
+    RouteItem item;
+    uint32_t dst_ip = dgram.header().dst;
+    for (size_t i = 0; i < _route_list.size(); i++) {
+        if (prefix_equal(dst_ip, _route_list[i].route_prefix, _route_list[i].prefix_length)) {
+            if (!route_found || item.prefix_length < _route_list[i].prefix_length) {
+                item = _route_list[i];
+                route_found = true;
+            }
+        }
+    }
+    if (!route_found) {
+        return;
+    }
+    if (dgram.header().ttl <= 1) {
+        return;
+    }
+    dgram.header().ttl--;
+    if (item.next_hop.has_value()) {
+        _interfaces[item.interface_num].send_datagram(dgram, item.next_hop.value());
+    } else {  // if not have next_hop, the next_hop is dgram's destination hop
+        _interfaces[item.interface_num].send_datagram(dgram, Address::from_ipv4_numeric(dgram.header().dst));
+    }
+}
+
+bool Router::prefix_equal(uint32_t ip1, uint32_t ip2, uint8_t len) {
+    // special judge right when shift 32 bit
+    uint32_t offset = (len == 0) ? 0 : 0xffffffff << (32 - len);
+    return (ip1 & offset) == (ip2 & offset);
+}
+```
+
+至此，CS144 所有 LAB 均已完成。
 
 
 ## doc

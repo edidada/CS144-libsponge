@@ -52,3 +52,104 @@ stream_reassembler.hh
 
 stream_reassembler.cc
 
+---
+
+LAB2
+
+要求实现序列号（Sequence Numbers）功能，完成三种序号之间的转换：序列号 seqno、绝对序列号 absolute seqno、流索引 stream index。三者区别如下：
+
+|  | Sequence Numbers | Absolute Sequence Numbers | Stream Indices |
+| --- | --- | --- | --- |
+| 起点 | Start at the ISN | Start at 0 | Start at 0 |
+| 是否包含 SYN/FIN | Include SYN/FIN | Include SYN/FIN | Omit SYN/FIN |
+| 位数/是否回绕 | 32 bits, wrapping | 64 bits, non-wrapping | 64 bits, non-wrapping |
+
+需要重点理解 `checkpoint` 的作用：它表示上一次转换求得的 absolute seqno，本次转换出的 absolute seqno 应当选择与 checkpoint 最为接近的那一个。原理是虽然 segment 不一定按序到达，但相邻两个 segment 序号差值几乎不可能超过 INT32_MAX（除非延迟以年为单位或发生比特差错）。实际操作就是把算出的序号分别加减 `1ul << 32` 后与 checkpoint 比较，取差的绝对值最小的那个。
+
+wrapping_integers.hh
+
+wrapping_integers.cc
+
+Implementing the TCP receiver
+
+要求实现基于滑动窗口的 TCP 接收端 TCPReceiver。整个接收端空间由窗口空间（基于 StreamReassembler）和缓冲区空间（基于 ByteStream）共享，需要注意**窗口长度等于接收端容量减去还留在缓冲区的字节数**（即 `_capacity - buffer_size`），只有当字节从缓冲区读出后窗口长度才能缩减。
+
+实现要点：
+
+0. 在收到 SYN 之前拒绝一切数据段，首个 SYN 段记录 ISN。
+1. 重复的 SYN / FIN 一律拒绝。
+2. ackno 的值为期望收到的下一个字节的序号（含 SYN/FIN 计数），未收到 SYN 时不返回 ackno。
+3. 完全落在窗口之外的段直接丢弃。
+
+tcp_receiver.hh
+
+tcp_receiver.cc
+
+LAB3
+
+要求实现 TCP 发送方 TCPSender。三个容易困惑的点：
+
+0. 本 LAB 用的是基于**累计确认**的 ARQ 协议：收到一个 ackno 代表接收方已收到 ackno 之前的所有段，与课本图 3-33 里"分别确认"的协议不同。实现上用队列保存未确认段，重传时只传队头即可。
+1. 首个发出的段应是**只包含 SYN 的段**，用作第一次握手（课本这么讲，但讲义里没说，容易写错）。
+2. 计时器启动的时机：发送新段时若计时器未在运行则启动；收到合法 ack 且仍有未确认段时重启；超时重传后 RTO 翻倍。
+
+tcp_sender.hh
+
+tcp_sender.cc
+
+LAB4
+
+要求实现 TCPConnection，把 TCPSender 和 TCPReceiver 封装成完整的 TCP 有限状态机（FSM，涉及 12 种状态转换）。难点主要在状态转换的细节逻辑，且 LAB4 之前的测试样例并不全面，前面几个 LAB 的潜在 BUG 会在本 LAB 的完备测试中集中爆发，需要回头修改前面的代码。
+
+tun.cc 编译错误：若报错 `field 'ifru_addr' has incomplete type 'sockaddr'`，参考 osquery issue #277，在 `libsponge/util/tun.cc` 中添加 `#include <sys/socket.h>` 即可。
+
+make check 超时或随机报错：webget 测试网站服务器在国外（网络问题），多重试几次即可。
+
+tcp_connection.hh
+
+tcp_connection.cc
+
+性能结果（作者 WSL i5-6200U / 阿里云 E5-2682 v4）：
+
+```
+$ ./apps/tcp_benchmark
+CPU-limited throughput                : 0.67 Gbit/s
+CPU-limited throughput with reordering: 0.52 Gbit/s
+```
+
+已超过讲义要求的最低 0.1 Gbit/s。
+
+瓶颈优化
+
+讲义只要求最低 0.1 Gbit/s，但示例是 1.78 Gbit/s，故利用《深入理解计算机系统》中的性能优化知识进一步优化。用 gprof 定位到 ByteStream 的 `write`/`pop`/`peek` 共同占据约 80% 运行时间，于是改用 `BufferList` 作为 ByteStream 的容器，将基于**内存拷贝**的存储改为基于**内存所有权转移**（std::move）的存储。
+
+优化后（作者机器）：
+
+```
+$ ./apps/tcp_benchmark
+CPU-limited throughput                : 1.84 Gbit/s
+CPU-limited throughput with reordering: 0.64 Gbit/s
+```
+
+byte_stream.hh
+
+byte_stream.cc
+
+LAB5
+
+要求实现 ARP 协议，在网络层与链路层之间搭桥。需要注意讲义没提到的一点：发送 ARP request 后若没有响应要**五秒后重发**，且在上一个请求被正常响应之前，其他的请求都要排在后面。
+
+network_interface.hh
+
+network_interface.cc
+
+LAB6
+
+要求实现基于最长前缀匹配（Longest Prefix Match）规则的路由器转发功能。讲义说明 O(N) 复杂度可以接受，故直接用 vector 作为路由转发表即可。注意当 `next_hop` 为空时代表本路由器就是目的路由器，此时 `next_hop` 取 dgram 的目的 IP 地址。
+
+router.hh
+
+router.cc
+
+至此，CS144 所有 LAB 均已完成。
+
