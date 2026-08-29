@@ -14,16 +14,23 @@ start_tap () {
     ip link set dev "${TAPDEV}" up
     ip route change "${TUN_IP_PREFIX}.${TAPNUM}.0/24" dev "${TAPDEV}" rto_min 10ms
 
-    # Apply NAT (masquerading) only to traffic from CS144's network devices
-    iptables -t nat -A PREROUTING -s ${TUN_IP_PREFIX}.${TAPNUM}.0/24 -j CONNMARK --set-mark ${TAPNUM}
-    iptables -t nat -A POSTROUTING -j MASQUERADE -m connmark --mark ${TAPNUM}
+    # Apply NAT only when traffic leaves CS144's link-local networks. Matching
+    # the source subnet directly avoids the CONNMARK extension, which isn't
+    # available in some WSL kernels.
+    iptables -t nat -A POSTROUTING -s ${TUN_IP_PREFIX}.${TAPNUM}.0/24 \
+        ! -d ${TUN_IP_PREFIX}.0.0/16 -j MASQUERADE
     echo 1 > /proc/sys/net/ipv4/ip_forward
 }
 
 stop_tap () {
     local TAPDEV="tap$1"
-    iptables -t nat -D PREROUTING -s ${TUN_IP_PREFIX}.${1}.0/24 -j CONNMARK --set-mark ${1}
-    iptables -t nat -D POSTROUTING -j MASQUERADE -m connmark --mark ${1}
+    # Best-effort cleanup of rules created by older versions of this script.
+    iptables -t nat -D PREROUTING -s ${TUN_IP_PREFIX}.${1}.0/24 \
+        -j CONNMARK --set-mark ${1} 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -j MASQUERADE \
+        -m connmark --mark ${1} 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s ${TUN_IP_PREFIX}.${1}.0/24 \
+        ! -d ${TUN_IP_PREFIX}.0.0/16 -j MASQUERADE 2>/dev/null || true
     ip tuntap del mode tap name "$TAPDEV"
 }
 
