@@ -1970,3 +1970,12 @@ make -j16        # 编译全部通过，无报错
 - 性能：2.73 / 1.11 Gbit/s，远超要求。
 
 唯一无法通过的 `t_webget` 确认为**网络环境限制**（`cs144.keithw.org:80` TCP 连接超时，curl 同样失败），非代码问题。代码实现整体正确。
+
+cd /home/wdidada/git/cpp/CS144-libsponge/build
+sudo make check_lab0 2>&1 | tee /tmp/check_lab0.log
+sudo make check_lab1 2>&1 | tee /tmp/check_lab1.log
+sudo make check_lab2 2>&1 | tee /tmp/check_lab2.log
+sudo make check_lab3 2>&1 | tee /tmp/check_lab3.log
+sudo make check_lab4 2>&1 | tee /tmp/check_lab4.log
+sudo make check_lab5 2>&1 | tee /tmp/check_lab5.log
+sudo make check_lab6 2>&1 | tee /tmp/check_lab6.log
