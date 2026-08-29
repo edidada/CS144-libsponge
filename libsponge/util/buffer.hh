@@ -10,6 +10,9 @@
 #include <string_view>
 #include <sys/uio.h>
 #include <vector>
+#include <ostream>
+#include <iostream>
+#include <sstream>
 
 //! \brief A reference-counted read-only string that can discard bytes from the front
 class Buffer {
@@ -27,8 +30,10 @@ class Buffer {
     //!@{
     std::string_view str() const {
         if (not _storage) {
+            std::cout << "Buffer_str" << std::endl;
             return {};
         }
+        std::cout << "Buffer_str2" << std::endl;
         return {_storage->data() + _starting_offset, _storage->size() - _starting_offset};
     }
 
@@ -47,6 +52,16 @@ class Buffer {
     //! \brief Discard the first `n` bytes of the string (does not require a copy or move)
     //! \note Doesn't free any memory until the whole string has been discarded in all copies of the Buffer.
     void remove_prefix(const size_t n);
+    // 添加 toString 方法
+//    std::string toString() const {
+//        if (!_storage) {
+//            // 处理_storage为空的情况（如果需要）
+//            return "Buffer data is empty";
+//        }
+//        std::stringstream ss;
+//        ss << "Buffer data: " << *_storage; // 使用*操作符解引用shared_ptr
+//        return ss.str();
+//    }
 };
 
 //! \brief A reference-counted discontiguous string that can discard bytes from the front
@@ -103,7 +118,9 @@ class BufferViewList {
     //!@{
 
     //! \brief Construct from a std::string
-    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {}
+    BufferViewList(const std::string &str) : BufferViewList(std::string_view(str)) {
+        std::cout << "BufferViewList_&str = " << str << std::endl;
+    }
 
     //! \brief Construct from a C string (must be NULL-terminated)
     BufferViewList(const char *s) : BufferViewList(std::string_view(s)) {}
@@ -112,7 +129,10 @@ class BufferViewList {
     BufferViewList(const BufferList &buffers);
 
     //! \brief Construct from a std::string_view
-    BufferViewList(std::string_view str) { _views.push_back({const_cast<char *>(str.data()), str.size()}); }
+    BufferViewList(std::string_view str) {
+      std::cout << "BufferViewList_string_view = " << str.data() <<"size(),"<<str.size()<< std::endl;
+      _views.push_back({const_cast<char *>(str.data()), str.size()});
+    }
     //!@}
 
     //! \brief Discard the first `n` bytes of the string (does not require a copy or move)

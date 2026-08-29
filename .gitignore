@@ -9,5 +9,8 @@ cmake_install.cmake
 CTestTestfile.cmake
 compile_commands.json
 
-.idea
 *.iml
+.idea
+cmake-build-*
+.codebuddy
+.cache

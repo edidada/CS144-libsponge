@@ -65,8 +65,16 @@ void BufferList::remove_prefix(size_t n) {
 }
 
 BufferViewList::BufferViewList(const BufferList &buffers) {
-    for (const auto &x : buffers.buffers()) {
+    std::cout << "BufferViewList_buffers" << std::endl;
+    for (const Buffer &x : buffers.buffers()) {
+        std::cout << "BufferViewList_buffers" << x.str()<<std::endl;
         _views.push_back(x);
+
+        // 遍历deque并逐个打印元素
+        for (const auto& view : _views) {
+            std::cout <<"BufferViewList_views" << view << ' '; // 打印string_view
+        }
+        std::cout << std::endl; // 换行
     }
 }
 
@@ -95,9 +103,11 @@ size_t BufferViewList::size() const {
 }
 
 vector<iovec> BufferViewList::as_iovecs() const {
+    std::cout << "BufferViewList_sas_iovecs" << std::endl;
     vector<iovec> ret;
     ret.reserve(_views.size());
     for (const auto &x : _views) {
+        std::cout << "BufferViewList_sas_iovecs_data" << std::endl;
         ret.push_back({const_cast<char *>(x.data()), x.size()});
     }
     return ret;
