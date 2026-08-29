@@ -1979,3 +1979,37 @@ sudo make check_lab3 2>&1 | tee /tmp/check_lab3.log
 sudo make check_lab4 2>&1 | tee /tmp/check_lab4.log
 sudo make check_lab5 2>&1 | tee /tmp/check_lab5.log
 sudo make check_lab6 2>&1 | tee /tmp/check_lab6.log
+
+在 WSL 下运行 CS144 Lab 遇到 `CONNMARK` 不支持的报错，主要是因为 WSL 2 默认的内核精简掉了一些网络模块，其中就包括 `CONNMARK` 这个关键功能。CS144 的脚本 `tun.sh` 依赖它来为虚拟网络设备做流量标记和网络地址转换（NAT），缺少这个支持，实验就没办法正常进行。
+
+目前主要有两种解决方案，你可以根据自己的情况来选。
+
+### 方案一：用虚拟机（推荐，省心省力）
+
+这是最多人选择、也最稳妥的办法。直接换到一个完整的 Linux 环境，比如课程官方的虚拟机镜像，或者自己用 VirtualBox 装一个 Ubuntu，就能从根本上避开 WSL 内核功能不全的问题。
+
+*   **直接使用课程提供的虚拟机**：课程官网通常会给一个 `.ova` 格式的虚拟机镜像，下载后用 VirtualBox 或 VMware 导入就能直接用，环境都是配好的。
+*   **自己安装 Ubuntu Server**：用虚拟机软件（如 VirtualBox）安装一个 Ubuntu Server 版（轻量，没图形界面），然后按 Lab 0 的指引装上必要的软件包就行。
+*   **留意兼容性问题**：如果你在用 VirtualBox 的时候，提示和 WSL 的 Hyper-V 冲突，可以试试**以管理员身份运行命令提示符**，执行 `bcdedit /set hypervisorlaunchtype off` 然后重启电脑；或者直接在 Windows 功能里把 WSL 关掉。
+
+### 方案二：编译 WSL 内核（不推荐新手）
+
+如果你坚持要在 WSL 里跑，就需要自己动手编译一个开启了 `CONNMARK` 功能的 WSL 内核。步骤如下，比较繁琐：
+
+1.  **获取内核源码**：从微软的 GitHub 仓库把 WSL 2 的内核源码 clone 下来。
+    ```bash
+    git clone --depth 1 https://github.com/microsoft/WSL2-Linux-Kernel.git
+    ```
+2.  **修改配置**：把当前 WSL 的配置复制过来，然后把 `CONNMARK` 相关的选项打开。
+    ```bash
+    zcat /proc/config.gz > .config
+    sed -i 's/# CONFIG_NETFILTER_XT_MATCH_CONNMARK is not set/CONFIG_NETFILTER_XT_MATCH_CONNMARK=y/g' .config
+    ```
+3.  **编译并替换内核**：编译新内核，然后把生成的 `bzImage` 文件复制到 Windows 系统里，最后在 `C:\Users\<你的用户名>\.wslconfig` 文件里指定用这个新内核启动。
+
+### 其他一些补充信息
+
+*   **`webget` 测试问题**：即使解决了 `CONNMARK`，在 WSL 上跑 `t_webget` 测试也可能会因为网络环境（比如开了 VPN）或配置差异而超时失败。所以用虚拟机依然是更推荐的方案。
+*   **`CONNMARK` 的作用**：CS144 的脚本里用 `CONNMARK` 标记数据包，是为了做源地址伪装 (MASQUERADE)，让虚拟网络设备能和外部网络通信。
+
+简单说，**最快的办法就是切换到课程提供的虚拟机上**，能省去很多折腾环境的时间。
