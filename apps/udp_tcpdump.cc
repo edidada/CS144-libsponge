@@ -1,3 +1,4 @@
+#include "logging.hh"
 #include "parser.hh"
 #include "tcp_header.hh"
 #include "tcp_segment.hh"
@@ -126,6 +127,7 @@ static int process_ipv4_ipv6(int len, const uint8_t *data, string &src_addr, str
 }
 
 int main(int argc, char **argv) {
+    Logger::get().open_file("logs/udp_tcpdump.log");
     char *dev = nullptr;
     const int exp_start = parse_arguments(argc, argv, &dev);
 

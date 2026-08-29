@@ -1,5 +1,7 @@
 #include "tcp_receiver.hh"
 
+#include "logging.hh"
+
 #include <optional>
 
 // Dummy implementation of a TCP receiver
@@ -23,6 +25,7 @@ bool TCPReceiver::segment_received(const TCPSegment &seg) {
         _syn_flag = true;
         ret = true;
         _isn = seg.header().seqno.raw_value();
+        LOG_INFO << "received SYN (ISN=" << seg.header().seqno << "): inbound stream starts at sequence number 0";
         abs_seqno = 1;
         _base = 1;
         length = seg.length_in_sequence_space() - 1;
@@ -42,6 +45,7 @@ bool TCPReceiver::segment_received(const TCPSegment &seg) {
         }
         _fin_flag = true;
         ret = true;
+        LOG_INFO << "received FIN (seq=" << seg.header().seqno << "): inbound stream ends";
     }
     // not FIN and not one size's SYN, check border
     else if (seg.length_in_sequence_space() == 0 && abs_seqno == _base) {

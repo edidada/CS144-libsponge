@@ -1,4 +1,5 @@
 #include "arp_message.hh"
+#include "logging.hh"
 #include "router.hh"
 #include "util.hh"
 
@@ -344,6 +345,7 @@ void network_simulator() {
 }
 
 int main() {
+    Logger::get().open_file("logs/network_simulator.log");
     try {
         network_simulator();
     } catch (const exception &e) {

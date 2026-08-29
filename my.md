@@ -1979,3 +1979,224 @@ sudo make check_lab3 2>&1 | tee /tmp/check_lab3.log
 sudo make check_lab4 2>&1 | tee /tmp/check_lab4.log
 sudo make check_lab5 2>&1 | tee /tmp/check_lab5.log
 sudo make check_lab6 2>&1 | tee /tmp/check_lab6.log
+
+在 WSL 下运行 CS144 Lab 遇到 `CONNMARK` 不支持的报错，主要是因为 WSL 2 默认的内核精简掉了一些网络模块，其中就包括 `CONNMARK` 这个关键功能。CS144 的脚本 `tun.sh` 依赖它来为虚拟网络设备做流量标记和网络地址转换（NAT），缺少这个支持，实验就没办法正常进行。
+
+目前主要有两种解决方案，你可以根据自己的情况来选。
+
+### 方案一：用虚拟机（推荐，省心省力）
+
+这是最多人选择、也最稳妥的办法。直接换到一个完整的 Linux 环境，比如课程官方的虚拟机镜像，或者自己用 VirtualBox 装一个 Ubuntu，就能从根本上避开 WSL 内核功能不全的问题。
+
+*   **直接使用课程提供的虚拟机**：课程官网通常会给一个 `.ova` 格式的虚拟机镜像，下载后用 VirtualBox 或 VMware 导入就能直接用，环境都是配好的。
+*   **自己安装 Ubuntu Server**：用虚拟机软件（如 VirtualBox）安装一个 Ubuntu Server 版（轻量，没图形界面），然后按 Lab 0 的指引装上必要的软件包就行。
+*   **留意兼容性问题**：如果你在用 VirtualBox 的时候，提示和 WSL 的 Hyper-V 冲突，可以试试**以管理员身份运行命令提示符**，执行 `bcdedit /set hypervisorlaunchtype off` 然后重启电脑；或者直接在 Windows 功能里把 WSL 关掉。
+
+### 方案二：编译 WSL 内核（不推荐新手）
+
+如果你坚持要在 WSL 里跑，就需要自己动手编译一个开启了 `CONNMARK` 功能的 WSL 内核。步骤如下，比较繁琐：
+
+1.  **获取内核源码**：从微软的 GitHub 仓库把 WSL 2 的内核源码 clone 下来。
+    ```bash
+    git clone --depth 1 https://github.com/microsoft/WSL2-Linux-Kernel.git
+    ```
+2.  **修改配置**：把当前 WSL 的配置复制过来，然后把 `CONNMARK` 相关的选项打开。
+    ```bash
+    zcat /proc/config.gz > .config
+    sed -i 's/# CONFIG_NETFILTER_XT_MATCH_CONNMARK is not set/CONFIG_NETFILTER_XT_MATCH_CONNMARK=y/g' .config
+    ```
+3.  **编译并替换内核**：编译新内核，然后把生成的 `bzImage` 文件复制到 Windows 系统里，最后在 `C:\Users\<你的用户名>\.wslconfig` 文件里指定用这个新内核启动。
+
+### 其他一些补充信息
+
+*   **`webget` 测试问题**：即使解决了 `CONNMARK`，在 WSL 上跑 `t_webget` 测试也可能会因为网络环境（比如开了 VPN）或配置差异而超时失败。所以用虚拟机依然是更推荐的方案。
+*   **`CONNMARK` 的作用**：CS144 的脚本里用 `CONNMARK` 标记数据包，是为了做源地址伪装 (MASQUERADE)，让虚拟网络设备能和外部网络通信。
+
+简单说，**最快的办法就是切换到课程提供的虚拟机上**，能省去很多折腾环境的时间。
+
+---
+
+## 附：Lab 日志系统与对应知识点
+
+### 1. 项目公共日志模块（工业级设计）
+
+Lab 0～6 的所有可执行程序都接入了统一的日志模块 `libsponge/util/logging.hh` / `logging.cc`，无需各程序各自实现：
+
+- **单例模式**：`Logger::get()` 返回全局唯一实例（函数内 `static` 局部对象，C++11 起线程安全地初始化一次）。
+- **一行一条、原子写入**：日志记录类 `Logger::Line` 用流式语法 `LOG_DEBUG << "..."`，析构时在 `std::mutex` 保护下把**完整一行**组装好再一次性写出，多线程（如 `tcp_ipv4` 的收/发线程）日志不会互相交错。
+- **每行包含**：毫秒级时间戳 `[YYYY-MM-DD HH:MM:SS.mmm]`、级别 `[DEBUG/INFO/WARN/ERROR]`、**线程 ID** `[thread 0x…]`、**源码位置** `[文件.cc:行号 完整函数签名(含类名)]`（由 `__FILE__`/`__LINE__`/`__PRETTY_FUNCTION__` 宏捕获）、正文。
+- **级别过滤**：`set_min_level()` 运行时控制输出下限；`LOCAL_DEBUG/INFO/WARN/ERROR` 四级。
+- **双输出**：始终镜像到 stderr（终端可见），同时写入日志文件。
+- **日志轮转**：`open_file(path, 512*1024, 3000)` 默认当文件超过 **500 KB 或 3000 行**时自动归档为 `<path>.<YYYYMMDD-HHMMSS.mmm>`（命名冲突自动追加 `.N`），再新建空文件继续写——对应工业界的 logrotate 思路，避免单个日志无限膨胀。
+- **启动自动归档**：程序每次启动若发现 `path` 已存在，会先把旧文件归档（重命名加时间戳）再写新的，因此**多次运行的历史日志全部保留**、互不覆盖（glog 同款行为，不再是简单 trunc 清空）。
+- **接入方式**：任何 app 只需两行即可启用：
+  ```cpp
+  #include "logging.hh"
+  // ...
+  Logger::get().open_file("xxx.log");
+  ```
+
+各 Lab 对应的程序与日志文件：
+
+| Lab | 程序 | 日志文件 |
+| --- | --- | --- |
+| Lab 0 | `webget` | `logs/webget.log` |
+| Lab 1/2 | `tcp_native`、`tcpsocket_test` | `logs/tcp_native.log`、`logs/tcpsocket_test.log` |
+| Lab 3 | `tcp_benchmark` | `logs/tcp_benchmark.log` |
+| Lab 4 | `tcp_ipv4` | `logs/tcp_ipv4.log` |
+| Lab 5 | `tcp_udp`、`udp_tcpdump` | `logs/tcp_udp.log`、`logs/udp_tcpdump.log` |
+| Lab 6 | `tcp_ip_ethernet`、`tun` | `logs/tcp_ip_ethernet.log`、`logs/tun.log` |
+
+### 2. 日志信息与 Lab 知识点的对应关系
+
+以 `tcp_ipv4`（Lab 4）访问 `www.baidu.com` 为例，日志中的每条记录都能对应到课本/讲义的知识点：
+
+- `Network interface has Ethernet address … and IP address …` —— Lab 4 的网络接口初始化：网卡有 MAC 地址，同时为接口配置 IP（此处来自 tun 虚拟网卡的 `169.254.10.9`）。
+- `Connecting to 36.152.44.93:80...` + `Connection established …` —— **三次握手**：客户端进入 `SYN_SENT`，收到 `SYN+ACK` 后发送 `ACK` 建立连接；`_tcp_loop` 在握手完成前一直阻塞等待状态迁移。
+- `Outbound stream to … finished (N bytes still in flight)` —— **滑动窗口/发送缓冲**：`bytes_in_flight` = 已发送但未被 ACK 的字节数，对应 Lab 2/3 的 `ByteStream` + 发送方窗口；N 不为 0 说明还有数据在途（FIN 之前必须把窗口里的数据清空）。
+- `Outbound stream … has been fully acknowledged` —— 发送方把整个字节流**全部 ACK** 后才允许进入关闭序列（先发 FIN）。
+- `Inbound stream from … finished cleanly / with an error/reset` —— 接收方向：对端正常 `FIN` 关闭为 *cleanly*；对端发送 `RST` 或收到校验和错误数据则进入错误状态 `error()`，对应 Lab 2 接收方状态机。
+- `Waiting for lingering segments …` —— **TIME_WAIT**：主动关闭方在收到对端 FIN 后进入 TIME_WAIT，等待可能的重传段，再等待 2×MSL 后才彻底关闭。
+- `TCP connection finished uncleanly` —— 连接以 `RST` 重置而非正常四次挥手，通常意味着对端异常或应用未读尽数据（Lab 3 的 `TCPState::State::RESET`）。
+- `Waiting for clean shutdown… done` —— 正常四次挥手（FIN→ACK→FIN→ACK）完成，两侧流都到达关闭状态。
+
+Lab 5/6 的日志补充对应知识点：
+
+- `udp_tcpdump` 的抓包日志 —— Lab 5 用 **UDP 承载 TCP 段**（模拟链路），体现 TCP 段可以封装进任意承载协议（此处为 UDP 数据报）；抓包可观察校验和、序号、ACK 的时序。
+- `tcp_ip_ethernet` / `tun` 的收包日志 —— Lab 6 路由器：从 TAP 设备收 Ethernet 帧 → 解析 ARP/IP → 查路由表转发，日志能直观看到 ARP 解析与转发路径，对应路由表最长前缀匹配（LPM）知识点。
+
+### 3. 本模块涉及的 C++ 技术点
+
+- **单例 + 延迟初始化**：`static Logger instance` 在首次访问时构造，进程退出自动析构。
+- **线程安全**：`std::mutex` + `lock_guard`（RAII 加解锁，异常安全）；时间戳用 `localtime_r`（可重入，替代线程不安全的 `localtime`）。
+- **流式接口**：`Line` 提供模板 `operator<<`，并特化接受 `std::endl`/`std::flush` 等操纵符；对象用右值传递 + move 构造，避免拷贝（C++17 下宏产生的临时对象走 guaranteed copy elision）。
+- **源码位置**：`__FILE__`、`__LINE__`、`__PRETTY_FUNCTION__`（GNU 扩展，输出含类名/模板实参的完整签名）在编译期展开，零运行时开销。
+- **文件流与轮转**：`std::ofstream` 以 `trunc` 模式打开；`tellp()` 读取写入后的文件偏移作为大小判断依据；`std::rename` 原子地归档旧文件，保证新文件立即从零开始。
+- **时间**：`std::chrono::system_clock` + `duration_cast<milliseconds>` 取毫秒；`put_time` 格式化；文件命名时间戳与日志行内时间戳共用一套时钟，便于归档文件与内容的对应。
+
+### 4. 结合真实运行日志逐 Lab 讲解（2026-08-29 实测）
+
+以下日志全部来自**本机实际运行**（`logs/` 目录），逐条对应到 Lab 实现代码与 TCP/IP 知识点。
+
+#### 4.1 Lab0：webget 真实 HTTP 抓取（`logs/webget.log`）
+
+```
+[DEBUG] Network interface has Ethernet address da:c3:7b:5b:d5:f2 and IP address 169.254.10.9
+[DEBUG] Connecting to 36.152.44.132:80...
+[INFO ] Connection established to 36.152.44.132:80.
+[DEBUG] Outbound stream to 36.152.44.132:80 finished (59 bytes still in flight).
+[DEBUG] Outbound stream to 36.152.44.132:80 has been fully acknowledged.
+```
+
+- `Network interface has Ethernet address … and IP address 169.254.10.9` —— `NetworkInterface` 构造（`network_interface.cc:26`）：链路层 MAC + IP 绑定；`169.254.x.x` 为 link-local，sponge 栈不依赖 DHCP，自配置地址即可收发。
+- `Connecting to …:80...` → `Connection established` —— `TCPSpongeSocket::connect()`（`tcp_sponge_socket.cc:215/226`）内部完成**三次握手**：SYN(随机 ISN)→SYN+ACK→ACK，Ethernet/IP/TCP 全栈自下而上交付，握手完成才返回。
+- `Outbound stream … finished (59 bytes still in flight)` —— 发送侧：`GET / HTTP/1.1\r\nHost: …\r\nConnection: close\r\n\r\n` 恰好 59 字节写入 outbound `ByteStream`；`bytes in flight` = 已发未 ACK 的字节，对应 Lab2/3 的发送窗口。
+- `… has been fully acknowledged` —— 对端 ACK 收齐（`TCPSender::ack_received` 中 `_segments_outstanding` 清空），HTTP 响应正文经 `get_URL` 打印到 stdout（实测 `HTTP/1.1 200 OK`）。
+
+#### 4.2 Lab2/3/4：tcp_benchmark 完整 TCP 生命周期（`logs/tcp_benchmark.log` 及其归档）
+
+`tcp_benchmark` 用两个 `TCPConnection`（x 主动、y 被动）互喂段，传输 100MB 数据，日志完整呈现**三次握手 → 数据/重传 → 挥手关闭**：
+
+三次握手（随机 ISN，来自归档文件）：
+
+```
+[INFO ] void TCPConnection::connect()] connect() called: active open, sending SYN
+[INFO ] void TCPSender::send_segment(TCPSegment&)] sending SYN (seqno=2018459252)
+[INFO ] bool TCPReceiver::segment_received(const TCPSegment&)] received SYN (ISN=2018459252): inbound stream starts at sequence number 0
+[INFO ] void TCPConnection::segment_received(const TCPSegment&)] received SYN (seq=2018459252): passive open, replying with SYN+ACK
+[INFO ] void TCPConnection::connect()] connect() called: active open, sending SYN     ← 被动侧内部回 SYN+ACK
+[INFO ] void TCPSender::send_segment(TCPSegment&)] sending SYN (seqno=1093048740)
+```
+
+- `TCPSender::send_segment`：`seg.header().seqno = wrap(_next_seqno, _isn)`，ISN 来自 `random_device()`（2018459252，每次运行不同——防序列号预测/伪造攻击）。
+- `TCPReceiver::segment_received`：被动侧记 `_isn`，**绝对序号从 1 开始**（SYN 本身占一个序号，`abs_seqno=1, _base=1`）。
+- `TCPConnection::segment_received` 判断 `_sender.next_seqno_absolute() == 0` → 收到 SYN 即被动打开，内部复用 `connect()` 发送 SYN+ACK——代码路径与日志完全对应。
+
+传输与重传（RTO 指数退避）：
+
+```
+[INFO ] TCPSender::ack_received] ACK advanced to 99519889: retransmission count reset, RTO restored to 1000ms
+[WARN ] TCPSender::tick] retransmitting oldest segment: retransmission #1, RTO doubled to 2000ms
+[DEBUG] TCPSender::ack_received] all outstanding segments acknowledged (ackno=104857602)
+```
+
+- `ack_received`：`unwrap(ackno, _isn, _recv_ackno)` 把 32 位回绕序号还原为 64 位绝对序号；`abs_ackno > _next_seqno` 判为非法（不能确认尚未发送的数据）；合法则弹出 outstanding 中被确认的段、`bytes_in_flight` 扣减、`fill_window()` 续传、RTO 复位 1000ms、重传计数清零、重启定时器。
+- `tick`：RTO 超时把最老段重新入队并 `RTO *= 2` 指数退避；日志 `retransmission #1, RTO doubled to 2000ms`，随后 ACK 到达立即复位——体现**重传定时器只在收到新 ACK 时重置**（Karn 规则思想）。
+- benchmark 中重传频繁是模拟器每 tick 大步长（100ms）推进所致（RTO=1000ms 在模拟时间上很快超时），真实网络 RTT 毫秒级不会如此频繁；日志反而直观演示了 RTO 退避机制。
+
+挥手与关闭：
+
+```
+[INFO ] TCPSender::send_segment] sending FIN (seqno=1465345898)
+[INFO ] TCPReceiver::segment_received] received FIN (seq=1465345898): inbound stream ends
+[INFO ] TCPConnection::segment_received] received FIN (seq=1465345898): inbound stream ends
+[DEBUG] TCPSender::ack_received] all outstanding segments acknowledged (ackno=104857602)
+[INFO ] TCPConnection::clean_shutdown] TCP connection closed cleanly (FIN exchange complete, all data acknowledged)
+```
+
+- `sending FIN`：`fill_window` 在窗口非满且 `_stream.eof()` 时给最后一个段追加 FIN（FIN 占 1 序号）。
+- `received FIN` 出现 receiver 与 connection 两层：receiver 层置 `_fin_flag` 收尾入站流；connection 层据此判定对端关闭。
+- `clean_shutdown`：满足 `_sender.stream_in().eof() && bytes_in_flight()==0 && _receiver.stream_out().input_ended()` 且（无 linger 或距最后收段 ≥ 10×RTO）→ `_active=false`，连接干净关闭（日志行 164）。
+
+日志轮转实测：100MB 传输共产生 **13322 行**日志，**500KB 阈值先触发**自动归档为 6 个 `tcp_benchmark.log.<时间戳>`（每档 ~2165 行 ≈ 498KB）——大数据量下日志模块的健壮性验证。
+
+#### 4.3 Lab5/6：network_simulator 路由器拓扑（`logs/network_simulator.log`）
+
+```
+[DEBUG] Network interface has Ethernet address 02:00:00:c8:01:0f and IP address 171.67.76.46
+[DEBUG] Network interface has Ethernet address 02:00:00:66:d2:2a and IP address 10.0.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:98:b2:d4 and IP address 172.16.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:45:6b:fe and IP address 192.168.0.1
+[DEBUG] Network interface has Ethernet address 02:00:00:e0:1e:ea and IP address 198.178.229.1
+[DEBUG] Network interface has Ethernet address 02:00:00:67:74:e3 and IP address 143.195.0.2
+[DEBUG] Network interface has Ethernet address 0a:fa:ca:33:6c:3b and IP address 10.0.0.2
+[DEBUG] Network interface has Ethernet address c2:52:c6:d0:25:c0 and IP address 198.178.229.42
+…（共 13 个接口）
+```
+
+- 13 个接口构造日志即 **CS144 顶层互联网拓扑**：`171.67.76.46`（Stanford 顶层交换机）、`10.0.0.1/172.16.0.1/192.168.0.1/143.195.0.2/198.178.229.1`（各区域路由器接口）、`198.178.229.42/43`（终端）。
+- `network_simulator` 随机注入 100 个 IPv4 包，路由器按**最长前缀匹配（LPM）**查转发表转发、TTL 递减、校验和重算（路由表在 `router.cc` 用前缀树维护）。
+- 配套的 Lab5 `network_interface.cc`：发送前查 ARP 表，未命中则广播 ARP 请求并缓存待发帧（带 TTL 防死锁），收到 ARP 回复后更新 MAC 表并续发——对应 `webget.log` 中 `Network interface has Ethernet address … and IP address …` 的初始化日志。
+
+> 说明：Lab4/5 的 tun/tap 实机测试（`tcp_ipv4`/`tcp_udp`/`tcp_native`/`tun` 等）需 sudo 权限，命令见会话记录；`tcpsocket_test` 使用 OS 原生 socket（不经 libsponge TCP 栈），故其日志文件为空属正常。
+
+---
+
+## 修复 `t_ipv4_client_send` 在 CI/WSL 中超时
+
+### 故障现象与判断
+
+端到端测试中，UDP 相关测试全部通过，但第一个依赖 TUN 的 IPv4 测试 `t_ipv4_client_send` 超时。日志显示客户端尝试连接约 6 秒后进入 `RESET`，服务端则一直停留在监听状态。
+
+这里的 `Connection established` 日志并不能证明三次握手成功：当前 `connect()` 在 TCP 状态离开 `SYN_SENT` 后就打印该日志，而连接收到 `RST` 同样会离开 `SYN_SENT`。约 6 秒的等待时间也与 SYN 按 12、24、48、96、192、384、768、1536、3072 ms 指数退避重传，最终超过最大重传次数后发送 RST 的行为吻合。
+
+由于普通 UDP 测试正常，而一进入需要主机在 `tun144` 和 `tun145` 之间转发数据包的 IPv4 测试就失败，因此问题更符合宿主机转发策略异常，而不是 TCP 状态机或数据传输逻辑错误。原来的 `tun.sh` 只开启了 `net.ipv4.ip_forward` 并配置 NAT，没有显式允许 `FORWARD` 链流量；Docker、GitHub Actions 和部分 WSL 环境常把该链默认策略设置为 `DROP`，于是 SYN 在宿主机转发阶段被丢弃。
+
+### 对 `tun.sh` 的修改
+
+- 为每个 CS144 TUN 子网添加来源方向的 `FORWARD ACCEPT` 规则，使实验网络发出的数据能够被宿主机转发。
+- 添加目的方向的 `RELATED,ESTABLISHED` 放行规则，使返回流量能够进入对应 TUN 子网。
+- 使用 `iptables -C` 检查规则是否已经存在，避免重复添加。
+- 在停止 TUN 设备时同步删除上述规则。
+- 扩展 `check_tun()`：除设备状态和 `ip_forward` 外，也检查两条转发规则；规则缺失时自动重建 TUN 配置。
+- 因为读取 iptables 规则需要管理员权限，把 `check_sudo` 提前到健康检查之前。
+- 把 `etc/tunconfig` 提前加载，确保健康检查阶段已经能取得 `TUN_IP_PREFIX`。
+
+新增规则只允许 `169.254.144.0/24`、`169.254.145.0/24` 等本项目创建的实验子网，不会把宿主机的所有转发流量全部放开。
+
+### 验证情况
+
+已执行：
+
+```bash
+bash -n tun.sh
+git diff --check
+```
+
+两项检查均通过。本地环境缺少 `libpcap`，且没有可用的特权 TUN 配置，因此未在本地完整运行 IPv4 端到端测试。可在 CI 或 WSL 中重新验证：
+
+```bash
+sudo ./tun.sh check 144 145
+cd build
+sudo ctest --output-on-failure --timeout 30 -R '^t_ipv4_client_send$'
+```

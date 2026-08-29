@@ -1,3 +1,4 @@
+#include "logging.hh"
 #include "tcp_sponge_socket.hh"
 #include "util.hh"
 
@@ -29,6 +30,10 @@ void get_URL(const string &host, const string &path) {
 }
 
 int main(int argc, char *argv[]) {
+    // Log all debugging output to "webget.log" (and keep showing it on the terminal).
+    Logger::get().open_file("logs/webget.log");
+    Logger::get().set_min_level(LogLevel::DEBUG);
+
     try {
         if (argc <= 0) {
             abort();  // For sticklers: don't try to access argv[0] if argc <= 0.

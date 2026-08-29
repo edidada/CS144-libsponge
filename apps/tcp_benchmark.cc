@@ -1,3 +1,4 @@
+#include "logging.hh"
 #include "tcp_connection.hh"
 
 #include <chrono>
@@ -104,6 +105,7 @@ void main_loop(const bool reorder) {
 }
 
 int main() {
+    Logger::get().open_file("logs/tcp_benchmark.log");
     try {
         main_loop(false);
         main_loop(true);

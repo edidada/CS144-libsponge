@@ -1,4 +1,5 @@
 #include "bidirectional_stream_copy.hh"
+#include "logging.hh"
 
 #include <cstdlib>
 #include <cstring>
@@ -12,6 +13,7 @@ void show_usage(const char *argv0) {
 }
 
 int main(int argc, char **argv) {
+    Logger::get().open_file("logs/tcp_native.log");
     try {
         bool server_mode = false;
         if (argc < 3 || ((server_mode = (strncmp("-l", argv[1], 3) == 0)) && argc < 4)) {

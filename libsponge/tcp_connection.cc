@@ -1,5 +1,7 @@
 #include "tcp_connection.hh"
 
+#include "logging.hh"
+
 #include <iostream>
 
 // Dummy implementation of a TCP connection
@@ -42,7 +44,12 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         send_empty = true;
     }
 
+    if (seg.header().fin) {
+        LOG_INFO << "received FIN (seq=" << seg.header().seqno << "): inbound stream ends";
+    }
+
     if (seg.header().syn && _sender.next_seqno_absolute() == 0) {
+        LOG_INFO << "received SYN (seq=" << seg.header().seqno << "): passive open, replying with SYN+ACK";
         connect();
         return;
     }
@@ -52,6 +59,7 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         if (in_syn_sent() && !seg.header().ack) {
             return;
         }
+        LOG_WARN << "received RST: unclean shutdown";
         unclean_shutdown(false);
         return;
     }
@@ -95,6 +103,7 @@ void TCPConnection::end_input_stream() {
 
 void TCPConnection::connect() {
     // when connect, must active send a SYN
+    LOG_INFO << "connect() called: active open, sending SYN";
     push_segments_out(true);
 }
 
@@ -133,6 +142,7 @@ bool TCPConnection::push_segments_out(bool send_syn) {
 }
 
 void TCPConnection::unclean_shutdown(bool send_rst) {
+    LOG_WARN << "unclean shutdown" << (send_rst ? " (sending RST)" : "");
     _receiver.stream_out().set_error();
     _sender.stream_in().set_error();
     _active = false;
@@ -151,6 +161,7 @@ bool TCPConnection::clean_shutdown() {
     }
     if (_sender.stream_in().eof() && _sender.bytes_in_flight() == 0 && _receiver.stream_out().input_ended()) {
         if (!_linger_after_streams_finish || time_since_last_segment_received() >= 10 * _cfg.rt_timeout) {
+            LOG_INFO << "TCP connection closed cleanly (FIN exchange complete, all data acknowledged)";
             _active = false;
         }
     }
