@@ -17,6 +17,12 @@ start_tun () {
     # available in some WSL kernels.
     iptables -t nat -A POSTROUTING -s ${TUN_IP_PREFIX}.${TUNNUM}.0/24 \
         ! -d ${TUN_IP_PREFIX}.0.0/16 -j MASQUERADE
+    # Docker and some CI images set the FORWARD policy to DROP. Permit traffic
+    # originating from this lab subnet, plus replies returning to it.
+    iptables -C FORWARD -s ${TUN_IP_PREFIX}.${TUNNUM}.0/24 -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -s ${TUN_IP_PREFIX}.${TUNNUM}.0/24 -j ACCEPT
+    iptables -C FORWARD -d ${TUN_IP_PREFIX}.${TUNNUM}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -d ${TUN_IP_PREFIX}.${TUNNUM}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     echo 1 > /proc/sys/net/ipv4/ip_forward
 }
 
@@ -29,6 +35,10 @@ stop_tun () {
         -m connmark --mark ${1} 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s ${TUN_IP_PREFIX}.${1}.0/24 \
         ! -d ${TUN_IP_PREFIX}.0.0/16 -j MASQUERADE 2>/dev/null || true
+    iptables -C FORWARD -s ${TUN_IP_PREFIX}.${1}.0/24 -j ACCEPT 2>/dev/null && \
+        iptables -D FORWARD -s ${TUN_IP_PREFIX}.${1}.0/24 -j ACCEPT
+    iptables -C FORWARD -d ${TUN_IP_PREFIX}.${1}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null && \
+        iptables -D FORWARD -d ${TUN_IP_PREFIX}.${1}.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     ip tuntap del mode tun name "$TUNDEV"
 }
 
